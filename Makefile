@@ -9,7 +9,7 @@ demo:
 
 radiogarden:
 	cd plugins/radiogarden && cargo build --release --target wasm32-wasip1
-	cp plugins/radiogarden/target/wasm32-wasip1/release/radiogarden.wasm dist/radiogarden.wasm
+	cp plugins/radiogarden/target/wasm32-wasip1/release/radiogarden_rust.wasm dist/radiogarden.wasm
 	@echo "Built dist/radiogarden.wasm ($$(ls -la dist/radiogarden.wasm | awk '{print $$5}') bytes)"
 
 trailers:
