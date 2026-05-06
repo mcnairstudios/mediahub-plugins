@@ -235,28 +235,32 @@ struct RefreshResponse {
 // Sepia Search response types
 // ============================================================
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct SepiaCategory {
     #[serde(default)]
     label: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[allow(non_snake_case)]
 struct SepiaChannel {
     #[serde(default)]
     displayName: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[allow(non_snake_case)]
 struct SepiaVideo {
     #[serde(default)]
     uuid: String,
     #[serde(default)]
+    shortUUID: String,
+    #[serde(default)]
     name: String,
     #[serde(default)]
     url: String,
+    #[serde(default)]
+    embedUrl: String,
     #[serde(default)]
     description: String,
     #[serde(default)]
@@ -271,7 +275,7 @@ struct SepiaVideo {
     channel: Option<SepiaChannel>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 struct SepiaSearchResponse {
     #[serde(default)]
     data: Vec<SepiaVideo>,
@@ -391,6 +395,24 @@ pub(crate) fn parse_video_detail(data: &[u8]) -> Option<VideoDetail> {
     serde_json::from_slice(data).ok()
 }
 
+/// Build a watch page URL from a video's host and shortUUID.
+/// This URL is playable in most embedded players without needing a detail fetch.
+/// Format: https://{host}/w/{shortUUID}
+pub(crate) fn build_watch_url(video: &SepiaVideo) -> String {
+    // Prefer embedUrl if available (e.g. https://instance/videos/embed/shortUUID)
+    if !video.embedUrl.is_empty() {
+        return video.embedUrl.clone();
+    }
+    // Build from shortUUID + instance host
+    if !video.shortUUID.is_empty() {
+        if let Some(host) = parse_instance_from_url(&video.url) {
+            return format!("https://{}/w/{}", host, video.shortUUID);
+        }
+    }
+    // Final fallback: the watch page URL from the search result
+    video.url.clone()
+}
+
 /// Format duration in seconds to a human-readable string like "1h 23m" or "5m 30s".
 pub(crate) fn format_duration(seconds: i64) -> String {
     if seconds <= 0 {
@@ -493,13 +515,13 @@ pub extern "C" fn describe() -> u64 {
                 "key": "search_terms",
                 "label": "Search terms (comma-separated)",
                 "type": "text",
-                "default": "documentary,music,science,technology"
+                "default": "documentary,music,science,technology,education,nature,art,news,cinema,cooking"
             }),
             serde_json::json!({
                 "key": "max_results",
                 "label": "Max results per search term",
                 "type": "text",
-                "default": "10"
+                "default": "15"
             }),
         ],
         view: View {
@@ -520,9 +542,14 @@ pub extern "C" fn describe() -> u64 {
     return_json(&desc)
 }
 
-/// Fetch the playable URL for a video, using KV cache to avoid redundant per-instance calls.
+/// Maximum number of per-video detail fetches to make per refresh.
+/// Beyond this limit, we use embed/watch page URLs which are still playable.
+const MAX_DETAIL_FETCHES: usize = 20;
+
+/// Try to fetch a direct stream URL for a video from its hosting instance.
+/// Returns the direct HLS/MP4 URL, or None if the fetch fails.
 #[cfg(not(test))]
-fn fetch_playable_url(video: &SepiaVideo) -> Option<String> {
+fn try_fetch_direct_url(video: &SepiaVideo) -> Option<String> {
     let cache_key = format!("pt_url_{}", video.uuid);
 
     // Check cache first
@@ -566,7 +593,7 @@ fn fetch_playable_url(video: &SepiaVideo) -> Option<String> {
 
     let playable = extract_playable_url(&detail);
 
-    // Cache the result
+    // Cache the result (even None is implicitly not cached, so next time we retry)
     if let Some(ref url) = playable {
         let entry = CachedVideoUrl {
             url: url.clone(),
@@ -579,11 +606,53 @@ fn fetch_playable_url(video: &SepiaVideo) -> Option<String> {
     playable
 }
 
-/// Test stub: returns None (no HTTP calls in tests).
 #[cfg(test)]
-fn fetch_playable_url(_video: &SepiaVideo) -> Option<String> {
+fn try_fetch_direct_url(_video: &SepiaVideo) -> Option<String> {
     None
 }
+
+/// Resolve the best playable URL for a video.
+/// If detail_budget > 0, attempts a per-instance API call (cached).
+/// Otherwise falls back to the embed/watch page URL.
+fn resolve_playable_url(video: &SepiaVideo, detail_budget: &mut usize) -> String {
+    // If we have budget for a detail fetch, try to get a direct stream URL
+    if *detail_budget > 0 {
+        if let Some(direct_url) = try_fetch_direct_url(video) {
+            *detail_budget -= 1;
+            return direct_url;
+        }
+        // Fetch failed or returned nothing -- still costs a budget slot
+        *detail_budget -= 1;
+    }
+
+    // Fallback: use the embed/watch page URL (still playable in most players)
+    build_watch_url(video)
+}
+
+/// Try to load a cached search response for a given term.
+#[cfg(not(test))]
+fn load_cached_search(term: &str) -> Option<SepiaSearchResponse> {
+    let cache_key = format!("pt_search_{}", term);
+    let cached = kv_get(&cache_key)?;
+    serde_json::from_str(&cached).ok()
+}
+
+#[cfg(test)]
+fn load_cached_search(_term: &str) -> Option<SepiaSearchResponse> {
+    None
+}
+
+/// Save a search response to cache.
+#[cfg(not(test))]
+fn save_cached_search(term: &str, resp: &SepiaSearchResponse) {
+    let cache_key = format!("pt_search_{}", term);
+    if let Ok(json) = serde_json::to_string(resp) {
+        kv_set(&cache_key, &json);
+    }
+}
+
+#[cfg(test)]
+fn save_cached_search(_term: &str, _resp: &SepiaSearchResponse) {}
 
 #[no_mangle]
 pub extern "C" fn refresh(config_ptr: u32, config_len: u32) -> u64 {
@@ -601,13 +670,13 @@ pub extern "C" fn refresh(config_ptr: u32, config_len: u32) -> u64 {
     let search_terms_raw = config
         .get("search_terms")
         .and_then(|v| v.as_str())
-        .unwrap_or("documentary,music,science,technology");
+        .unwrap_or("documentary,music,science,technology,education,nature,art,news,cinema,cooking");
 
     let max_results: u32 = config
         .get("max_results")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse().ok())
-        .unwrap_or(10);
+        .unwrap_or(15);
 
     let terms: Vec<&str> = search_terms_raw
         .split(',')
@@ -620,66 +689,77 @@ pub extern "C" fn refresh(config_ptr: u32, config_len: u32) -> u64 {
         return return_json(&RefreshResponse { streams: vec![] });
     }
 
-    let mut streams: Vec<Stream> = Vec::new();
+    // Phase 1: Collect all candidate videos from search results (no detail fetches yet).
+    let mut candidates: Vec<SepiaVideo> = Vec::new();
     let mut seen_uuids: HashSet<String> = HashSet::new();
 
     for term in &terms {
-        let encoded_term = url_encode(term);
-        let search_url = format!(
-            "https://search.joinpeertube.org/api/v1/search/videos?search={}&count={}&nsfw=false",
-            encoded_term, max_results
-        );
-        log_info(&format!("searching: {}", search_url));
+        // Try cache first
+        let search_resp = if let Some(cached_resp) = load_cached_search(term) {
+            log_info(&format!("search cache hit for '{}'", term));
+            cached_resp
+        } else {
+            let encoded_term = url_encode(term);
+            let search_url = format!(
+                "https://search.joinpeertube.org/api/v1/search/videos?search={}&count={}&nsfw=false",
+                encoded_term, max_results
+            );
+            log_info(&format!("searching: {}", search_url));
 
-        let body = match http_get(&search_url) {
-            Some(b) => b,
-            None => {
-                log_error(&format!("failed to search for term: {}", term));
-                continue;
-            }
-        };
-
-        let search_resp: SepiaSearchResponse = match parse_search_response(&body) {
-            Some(r) => r,
-            None => {
-                log_error(&format!("failed to parse search response for: {}", term));
-                continue;
-            }
-        };
-
-        log_info(&format!(
-            "found {} results for '{}' (total: {})",
-            search_resp.data.len(),
-            term,
-            search_resp.total
-        ));
-
-        for video in &search_resp.data {
-            // Skip NSFW content
-            if video.nsfw {
-                continue;
-            }
-
-            // Deduplicate by UUID
-            if video.uuid.is_empty() || !seen_uuids.insert(video.uuid.clone()) {
-                continue;
-            }
-
-            // Fetch playable URL (with caching)
-            let playable_url = match fetch_playable_url(video) {
-                Some(url) => url,
+            let body = match http_get(&search_url) {
+                Some(b) => b,
                 None => {
-                    // Fall back to the watch page URL if we cannot get a direct stream
-                    log_info(&format!("using watch URL as fallback for {}", video.uuid));
-                    video.url.clone()
+                    log_error(&format!("failed to search for term: {}", term));
+                    continue;
                 }
             };
 
-            streams.push(sepia_video_to_stream(video, &playable_url));
+            let resp: SepiaSearchResponse = match parse_search_response(&body) {
+                Some(r) => r,
+                None => {
+                    log_error(&format!("failed to parse search response for: {}", term));
+                    continue;
+                }
+            };
+
+            save_cached_search(term, &resp);
+
+            log_info(&format!(
+                "found {} results for '{}' (total: {})",
+                resp.data.len(),
+                term,
+                resp.total
+            ));
+
+            resp
+        };
+
+        for video in search_resp.data {
+            if video.nsfw {
+                continue;
+            }
+            if video.uuid.is_empty() || !seen_uuids.insert(video.uuid.clone()) {
+                continue;
+            }
+            candidates.push(video);
         }
     }
 
-    log_info(&format!("refresh complete: {} streams", streams.len()));
+    // Phase 2: Resolve playable URLs. Use detail fetches (capped) for the first
+    // batch, then fall back to embed/watch URLs for the rest.
+    let mut detail_budget = MAX_DETAIL_FETCHES;
+    let mut streams: Vec<Stream> = Vec::with_capacity(candidates.len());
+
+    for video in &candidates {
+        let playable_url = resolve_playable_url(video, &mut detail_budget);
+        streams.push(sepia_video_to_stream(video, &playable_url));
+    }
+
+    log_info(&format!(
+        "refresh complete: {} streams ({} detail fetches used)",
+        streams.len(),
+        MAX_DETAIL_FETCHES - detail_budget
+    ));
     return_json(&RefreshResponse { streams })
 }
 

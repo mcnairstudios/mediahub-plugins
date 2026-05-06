@@ -134,10 +134,11 @@ fn test_parse_camera_valid() {
         "https://wzmedia.dot.ca.gov/D7/CCTV-196.stream/playlist.m3u8"
     );
     assert_eq!(stream.group, "D7 - Los Angeles");
-    assert!(stream.tags.contains(&"california".to_string()));
-    assert!(stream.tags.contains(&"i-5".to_string()));
-    assert!(stream.tags.contains(&"los angeles".to_string()));
-    assert!(stream.tags.contains(&"nb".to_string()));
+    let tags = stream.tags.as_ref().unwrap();
+    assert!(tags.contains(&"california".to_string()));
+    assert!(tags.contains(&"i-5".to_string()));
+    assert!(tags.contains(&"los angeles".to_string()));
+    assert!(tags.contains(&"nb".to_string()));
 }
 
 #[test]
@@ -381,7 +382,7 @@ fn test_county_in_tags() {
     );
 
     let stream = parse_camera(&cam, 11).unwrap();
-    assert!(stream.tags.contains(&"san diego".to_string()));
+    assert!(stream.tags.as_ref().unwrap().contains(&"san diego".to_string()));
 }
 
 // ============================================================
@@ -453,18 +454,19 @@ fn test_stream_tags_searchable() {
     );
 
     let stream = parse_camera(&cam, 7).unwrap();
+    let tags = stream.tags.as_ref().unwrap();
 
     // Simulate search matching logic
     let query = "i-405";
     let query_lower = query.to_lowercase();
     let name_match = stream.name.to_lowercase().contains(&query_lower);
-    let tags_match = stream.tags.iter().any(|t| t.contains(&query_lower));
+    let tags_match = tags.iter().any(|t| t.contains(&query_lower));
     assert!(name_match || tags_match);
 
     // Search by county
     let query2 = "los angeles";
     let query2_lower = query2.to_lowercase();
-    let tags_match2 = stream.tags.iter().any(|t| t.contains(&query2_lower));
+    let tags_match2 = tags.iter().any(|t| t.contains(&query2_lower));
     assert!(tags_match2);
 }
 
@@ -510,9 +512,9 @@ fn test_stream_serialization() {
         name: "Test Camera".to_string(),
         url: "https://example.com/stream.m3u8".to_string(),
         group: "D7 - Los Angeles".to_string(),
-        logo: String::new(),
-        vod_type: String::new(),
-        tags: vec!["california".to_string(), "i-5".to_string()],
+        logo: None,
+        vod_type: "live".to_string(),
+        tags: Some(vec!["california".to_string(), "i-5".to_string()]),
     };
 
     let json_str = serde_json::to_string(&stream).unwrap();

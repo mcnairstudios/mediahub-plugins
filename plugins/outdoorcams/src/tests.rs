@@ -75,10 +75,10 @@ fn test_ski_streams_count() {
 }
 
 #[test]
-fn test_all_streams_have_vod_type_movie() {
+fn test_all_streams_have_vod_type_live() {
     let streams = build_streams();
     for s in &streams {
-        assert_eq!(s.vod_type, "movie", "stream '{}' has wrong vod_type", s.id);
+        assert_eq!(s.vod_type, "live", "stream '{}' has wrong vod_type", s.id);
     }
 }
 

@@ -417,7 +417,7 @@ pub fn build_streams() -> Vec<Stream> {
             url: format!("https://www.youtube.com/watch?v={}", cam.video_id),
             group: cam.group.to_string(),
             logo: None,
-            vod_type: "movie".to_string(),
+            vod_type: "live".to_string(),
             tags: Some(cam.tags.iter().map(|t| t.to_string()).collect()),
         })
         .collect()

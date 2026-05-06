@@ -122,8 +122,10 @@ fn test_parse_search_response_basic() {
         "data": [
             {
                 "uuid": "aaaa-bbbb",
+                "shortUUID": "abc123",
                 "name": "Test Video 1",
                 "url": "https://tube.example.org/videos/watch/aaaa-bbbb",
+                "embedUrl": "https://tube.example.org/videos/embed/abc123",
                 "description": "A test video",
                 "duration": 120,
                 "thumbnailUrl": "https://tube.example.org/static/thumbnails/thumb1.jpg",
@@ -150,6 +152,7 @@ fn test_parse_search_response_basic() {
     assert_eq!(resp.data.len(), 2);
 
     assert_eq!(resp.data[0].uuid, "aaaa-bbbb");
+    assert_eq!(resp.data[0].shortUUID, "abc123");
     assert_eq!(resp.data[0].name, "Test Video 1");
     assert_eq!(resp.data[0].duration, 120);
     assert!(!resp.data[0].nsfw);
@@ -303,6 +306,159 @@ fn test_parse_video_detail_invalid_json() {
 }
 
 // ============================================================
+// Test: build_watch_url
+// ============================================================
+
+#[test]
+fn test_build_watch_url_prefers_embed_url() {
+    let video = SepiaVideo {
+        uuid: "full-uuid".to_string(),
+        shortUUID: "abc123".to_string(),
+        name: "Test".to_string(),
+        url: "https://tube.example.org/videos/watch/full-uuid".to_string(),
+        embedUrl: "https://tube.example.org/videos/embed/abc123".to_string(),
+        description: String::new(),
+        duration: 0,
+        thumbnailUrl: String::new(),
+        nsfw: false,
+        category: None,
+        channel: None,
+    };
+
+    assert_eq!(
+        build_watch_url(&video),
+        "https://tube.example.org/videos/embed/abc123"
+    );
+}
+
+#[test]
+fn test_build_watch_url_uses_short_uuid_when_no_embed() {
+    let video = SepiaVideo {
+        uuid: "full-uuid".to_string(),
+        shortUUID: "abc123".to_string(),
+        name: "Test".to_string(),
+        url: "https://tube.example.org/videos/watch/full-uuid".to_string(),
+        embedUrl: String::new(),
+        description: String::new(),
+        duration: 0,
+        thumbnailUrl: String::new(),
+        nsfw: false,
+        category: None,
+        channel: None,
+    };
+
+    assert_eq!(
+        build_watch_url(&video),
+        "https://tube.example.org/w/abc123"
+    );
+}
+
+#[test]
+fn test_build_watch_url_falls_back_to_watch_url() {
+    let video = SepiaVideo {
+        uuid: "full-uuid".to_string(),
+        shortUUID: String::new(),
+        name: "Test".to_string(),
+        url: "https://tube.example.org/videos/watch/full-uuid".to_string(),
+        embedUrl: String::new(),
+        description: String::new(),
+        duration: 0,
+        thumbnailUrl: String::new(),
+        nsfw: false,
+        category: None,
+        channel: None,
+    };
+
+    assert_eq!(
+        build_watch_url(&video),
+        "https://tube.example.org/videos/watch/full-uuid"
+    );
+}
+
+// ============================================================
+// Test: resolve_playable_url
+// ============================================================
+
+#[test]
+fn test_resolve_playable_url_with_zero_budget_uses_watch_url() {
+    let video = SepiaVideo {
+        uuid: "test-uuid".to_string(),
+        shortUUID: "shortABC".to_string(),
+        name: "Test".to_string(),
+        url: "https://tube.example.org/videos/watch/test-uuid".to_string(),
+        embedUrl: "https://tube.example.org/videos/embed/shortABC".to_string(),
+        description: String::new(),
+        duration: 0,
+        thumbnailUrl: String::new(),
+        nsfw: false,
+        category: None,
+        channel: None,
+    };
+
+    let mut budget: usize = 0;
+    let url = resolve_playable_url(&video, &mut budget);
+    // With zero budget, should use embed URL (no detail fetch attempted)
+    assert_eq!(url, "https://tube.example.org/videos/embed/shortABC");
+    assert_eq!(budget, 0);
+}
+
+#[test]
+fn test_resolve_playable_url_with_budget_decrements() {
+    // In test mode, try_fetch_direct_url returns None, so it falls back
+    // but still decrements the budget
+    let video = SepiaVideo {
+        uuid: "test-uuid".to_string(),
+        shortUUID: "shortXYZ".to_string(),
+        name: "Test".to_string(),
+        url: "https://tube.example.org/videos/watch/test-uuid".to_string(),
+        embedUrl: "https://tube.example.org/videos/embed/shortXYZ".to_string(),
+        description: String::new(),
+        duration: 0,
+        thumbnailUrl: String::new(),
+        nsfw: false,
+        category: None,
+        channel: None,
+    };
+
+    let mut budget: usize = 5;
+    let url = resolve_playable_url(&video, &mut budget);
+    // Detail fetch failed (test stub), falls back to embed URL
+    assert_eq!(url, "https://tube.example.org/videos/embed/shortXYZ");
+    // Budget was decremented even though the fetch failed
+    assert_eq!(budget, 4);
+}
+
+#[test]
+fn test_resolve_playable_url_budget_exhaustion() {
+    let make_video = |i: usize| SepiaVideo {
+        uuid: format!("uuid-{}", i),
+        shortUUID: format!("short-{}", i),
+        name: format!("Video {}", i),
+        url: format!("https://tube.example.org/videos/watch/uuid-{}", i),
+        embedUrl: format!("https://tube.example.org/videos/embed/short-{}", i),
+        description: String::new(),
+        duration: 0,
+        thumbnailUrl: String::new(),
+        nsfw: false,
+        category: None,
+        channel: None,
+    };
+
+    let mut budget: usize = 2;
+
+    // First two consume the budget
+    resolve_playable_url(&make_video(0), &mut budget);
+    assert_eq!(budget, 1);
+    resolve_playable_url(&make_video(1), &mut budget);
+    assert_eq!(budget, 0);
+
+    // Third should not attempt a fetch, budget stays at 0
+    let url = resolve_playable_url(&make_video(2), &mut budget);
+    assert_eq!(budget, 0);
+    assert_eq!(url, "https://tube.example.org/videos/embed/short-2");
+}
+
+// ============================================================
 // Test: sepia_video_to_stream
 // ============================================================
 
@@ -310,8 +466,10 @@ fn test_parse_video_detail_invalid_json() {
 fn test_sepia_video_to_stream_with_category() {
     let video = SepiaVideo {
         uuid: "test-uuid-1234".to_string(),
+        shortUUID: "shortTest".to_string(),
         name: "Intro to Rust".to_string(),
         url: "https://tube.example.org/videos/watch/test-uuid-1234".to_string(),
+        embedUrl: "https://tube.example.org/videos/embed/shortTest".to_string(),
         description: "A great tutorial".to_string(),
         duration: 600,
         thumbnailUrl: "https://tube.example.org/thumb.jpg".to_string(),
@@ -340,8 +498,10 @@ fn test_sepia_video_to_stream_with_category() {
 fn test_sepia_video_to_stream_no_category_uses_instance() {
     let video = SepiaVideo {
         uuid: "uuid-5678".to_string(),
+        shortUUID: String::new(),
         name: "Some Video".to_string(),
         url: "https://framatube.org/videos/watch/uuid-5678".to_string(),
+        embedUrl: String::new(),
         description: "".to_string(),
         duration: 0,
         thumbnailUrl: "".to_string(),
@@ -362,8 +522,10 @@ fn test_sepia_video_to_stream_no_category_uses_instance() {
 fn test_sepia_video_to_stream_relative_thumbnail() {
     let video = SepiaVideo {
         uuid: "uuid-rel".to_string(),
+        shortUUID: String::new(),
         name: "Relative Thumb".to_string(),
         url: "https://tube.example.org/videos/watch/uuid-rel".to_string(),
+        embedUrl: String::new(),
         description: "".to_string(),
         duration: 30,
         thumbnailUrl: "/static/thumbnails/thumb.jpg".to_string(),
@@ -384,8 +546,10 @@ fn test_sepia_video_to_stream_long_description_truncated() {
     let long_desc = "A".repeat(300);
     let video = SepiaVideo {
         uuid: "uuid-long".to_string(),
+        shortUUID: String::new(),
         name: "Long Desc".to_string(),
         url: "https://tube.example.org/videos/watch/uuid-long".to_string(),
+        embedUrl: String::new(),
         description: long_desc,
         duration: 60,
         thumbnailUrl: "".to_string(),
@@ -449,4 +613,53 @@ fn test_extract_playable_url_skips_empty_playlist_url() {
 
     let url = extract_playable_url(&detail).unwrap();
     assert_eq!(url, "https://example.org/hls/master.m3u8");
+}
+
+// ============================================================
+// Test: MAX_DETAIL_FETCHES constant
+// ============================================================
+
+#[test]
+fn test_max_detail_fetches_is_reasonable() {
+    // Ensure the cap is set to a sane value
+    assert_eq!(MAX_DETAIL_FETCHES, 20);
+}
+
+// ============================================================
+// Test: search response round-trips through serde (for caching)
+// ============================================================
+
+#[test]
+fn test_search_response_serialization_roundtrip() {
+    let resp = SepiaSearchResponse {
+        total: 1,
+        data: vec![SepiaVideo {
+            uuid: "round-trip-uuid".to_string(),
+            shortUUID: "rtShort".to_string(),
+            name: "Round Trip".to_string(),
+            url: "https://tube.example.org/videos/watch/round-trip-uuid".to_string(),
+            embedUrl: "https://tube.example.org/videos/embed/rtShort".to_string(),
+            description: "Testing serialization".to_string(),
+            duration: 42,
+            thumbnailUrl: "https://tube.example.org/thumb.jpg".to_string(),
+            nsfw: false,
+            category: Some(SepiaCategory {
+                label: "Tech".to_string(),
+            }),
+            channel: Some(SepiaChannel {
+                displayName: "TestChan".to_string(),
+            }),
+        }],
+    };
+
+    let json = serde_json::to_string(&resp).unwrap();
+    let deserialized: SepiaSearchResponse = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(deserialized.total, 1);
+    assert_eq!(deserialized.data.len(), 1);
+    assert_eq!(deserialized.data[0].uuid, "round-trip-uuid");
+    assert_eq!(deserialized.data[0].shortUUID, "rtShort");
+    assert_eq!(deserialized.data[0].embedUrl, "https://tube.example.org/videos/embed/rtShort");
+    assert_eq!(deserialized.data[0].name, "Round Trip");
+    assert_eq!(deserialized.data[0].duration, 42);
 }

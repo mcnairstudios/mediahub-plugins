@@ -450,41 +450,64 @@ pub extern "C" fn refresh(config_ptr: u32, config_len: u32) -> u64 {
     let tags = config
         .get("tags")
         .and_then(|v| v.as_str())
-        .unwrap_or("remix");
+        .unwrap_or("");
     let limit = config
         .get("limit")
         .and_then(|v| v.as_u64())
         .unwrap_or(50);
 
-    let url = format!(
-        "http://ccmixter.org/api/query?f=json&tags={}&limit={}&sort=rank&ord=desc",
-        tags, limit
-    );
+    let mut all_streams: Vec<Stream> = Vec::new();
+    let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    log_info(&format!("fetching ccmixter tracks: {}", url));
-
-    let body = match http_get(&url) {
-        Some(b) => b,
-        None => {
-            log_error("failed to fetch ccmixter API");
-            return return_json(&RefreshResponse { streams: vec![] });
-        }
+    // If user specified tags, use them; otherwise fetch across multiple content types
+    let tag_list: Vec<&str> = if tags.is_empty() {
+        vec!["remix", "sample", "a_cappella", "editorial_pick"]
+    } else {
+        tags.split(',').map(|t| t.trim()).filter(|t| !t.is_empty()).collect()
     };
 
-    let uploads: Vec<Value> = match serde_json::from_slice(&body) {
-        Ok(v) => v,
-        Err(e) => {
-            log_error(&format!("failed to parse ccmixter response: {}", e));
-            return return_json(&RefreshResponse { streams: vec![] });
-        }
+    let per_tag_limit = if tag_list.len() > 1 {
+        std::cmp::max(limit / tag_list.len() as u64, 10)
+    } else {
+        limit
     };
 
-    log_info(&format!("parsed {} uploads from ccmixter", uploads.len()));
+    for tag in &tag_list {
+        let url = format!(
+            "http://ccmixter.org/api/query?f=json&tags={}&limit={}&sort=rank&ord=desc",
+            tag, per_tag_limit
+        );
 
-    let streams: Vec<Stream> = uploads
-        .iter()
-        .filter_map(|upload| upload_to_stream(upload))
-        .collect();
+        log_info(&format!("fetching ccmixter tracks: {}", url));
+
+        let body = match http_get(&url) {
+            Some(b) => b,
+            None => {
+                log_error(&format!("failed to fetch ccmixter API for tag '{}'", tag));
+                continue;
+            }
+        };
+
+        let uploads: Vec<Value> = match serde_json::from_slice(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                log_error(&format!("failed to parse ccmixter response for tag '{}': {}", tag, e));
+                continue;
+            }
+        };
+
+        log_info(&format!("parsed {} uploads from ccmixter for tag '{}'", uploads.len(), tag));
+
+        for upload in &uploads {
+            if let Some(stream) = upload_to_stream(upload) {
+                if seen_ids.insert(stream.id.clone()) {
+                    all_streams.push(stream);
+                }
+            }
+        }
+    }
+
+    let streams = all_streams;
 
     log_info(&format!("returning {} streams", streams.len()));
 

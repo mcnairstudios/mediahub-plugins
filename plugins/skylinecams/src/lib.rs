@@ -170,9 +170,11 @@ struct Stream {
     name: String,
     url: String,
     group: String,
-    logo: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    logo: Option<String>,
     vod_type: String,
-    tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tags: Option<Vec<String>>,
 }
 
 // ============================================================
@@ -533,9 +535,9 @@ fn cam_to_stream(cam: &CamInfo) -> Stream {
         name: cam.name.clone(),
         url: cam.url.clone(),
         group: cam.group.clone(),
-        logo: cam.thumbnail.clone(),
+        logo: if cam.thumbnail.is_empty() { None } else { Some(cam.thumbnail.clone()) },
         vod_type: "live".to_string(),
-        tags: cam.tags.clone(),
+        tags: if cam.tags.is_empty() { None } else { Some(cam.tags.clone()) },
     }
 }
 

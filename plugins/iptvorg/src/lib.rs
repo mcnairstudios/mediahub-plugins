@@ -9,6 +9,7 @@ mod tests;
 // Host function imports
 // ============================================================
 
+#[cfg(not(test))]
 extern "C" {
     fn host_log(level: u32, msg_ptr: u32, msg_len: u32);
     fn host_http_request(
@@ -69,16 +70,25 @@ fn return_json<T: Serialize>(value: &T) -> u64 {
     }
 }
 
+#[cfg(not(test))]
 fn log_info(msg: &str) {
     let bytes = msg.as_bytes();
     unsafe { host_log(1, bytes.as_ptr() as u32, bytes.len() as u32) }
 }
 
+#[cfg(not(test))]
 fn log_error(msg: &str) {
     let bytes = msg.as_bytes();
     unsafe { host_log(3, bytes.as_ptr() as u32, bytes.len() as u32) }
 }
 
+#[cfg(test)]
+fn log_info(_msg: &str) {}
+
+#[cfg(test)]
+fn log_error(_msg: &str) {}
+
+#[cfg(not(test))]
 fn http_get(url: &str) -> Option<Vec<u8>> {
     let url_bytes = url.as_bytes();
     let method = b"GET";
@@ -105,6 +115,7 @@ fn http_get(url: &str) -> Option<Vec<u8>> {
     Some(unsafe { slice::from_raw_parts(ptr as *const u8, len as usize).to_vec() })
 }
 
+#[cfg(not(test))]
 fn kv_get(key: &str) -> Option<String> {
     let kb = key.as_bytes();
     let result = unsafe { host_kv_get(kb.as_ptr() as u32, kb.len() as u32) };
@@ -119,6 +130,7 @@ fn kv_get(key: &str) -> Option<String> {
     Some(String::from_utf8_lossy(data).to_string())
 }
 
+#[cfg(not(test))]
 fn kv_set(key: &str, value: &str) {
     let kb = key.as_bytes();
     let vb = value.as_bytes();
@@ -235,6 +247,55 @@ pub(crate) fn build_tags(quality: &Option<String>, label: &Option<String>) -> Ve
     tags
 }
 
+/// Categorize a stream title into a meaningful group using keyword matching.
+/// Returns a category string like "News", "Sports", "Movies", etc.
+pub(crate) fn categorize_title(title: &str) -> String {
+    let lower = title.to_lowercase();
+
+    // Order matters: check more specific patterns first
+    static RULES: &[(&[&str], &str)] = &[
+        (&["news", "cnn", "bbc news", "fox news", "msnbc", "cnbc", "al jazeera", "reuters",
+            "euronews", "france 24", "dw ", "rt ", "breaking news", "headline", "journal",
+            "noticias", "nachrichten", "akhbar"], "News"),
+        (&["sport", "espn", "football", "soccer", "cricket", "nba", "nfl", "mlb", "nhl",
+            "tennis", "golf", "racing", "f1 ", "formula", "boxing", "wrestling", "ufc",
+            "futbol", "calcio", "deportes"], "Sports"),
+        (&["movie", "cinema", "film", "hollywood", "bollywood", "action movie",
+            "thriller", "horror movie", "comedy movie", "classic movie"], "Movies"),
+        (&["music", "mtv", "vh1", "radio", "hits", "songs", "concert", "jazz",
+            "rock ", "pop ", "hip hop", "reggae", "country music", "musica",
+            "musik", "musique"], "Music"),
+        (&["kids", "cartoon", "nick", "disney", "junior", "child", "baby tv",
+            "boomerang", "toon", "animat", "pokemon", "sesame"], "Kids"),
+        (&["document", "discovery", "national geographic", "nat geo", "history",
+            "nature", "science", "animal planet", "planet earth", "wildlife",
+            "education"], "Documentary"),
+        (&["cook", "food", "kitchen", "recipe", "chef", "bake", "cuisine",
+            "travel", "adventure", "explore", "tourism", "destination",
+            "lonely planet"], "Lifestyle"),
+        (&["religion", "church", "gospel", "christian", "islamic", "quran",
+            "bible", "faith", "prayer", "worship", "god ", "jesus", "allah",
+            "hindu", "buddhist"], "Religious"),
+        (&["shop", "qvc", "hsn", "home shopping", "teleshopping",
+            "infomercial"], "Shopping"),
+        (&["weather", "forecast", "climate", "meteo"], "Weather"),
+        (&["gaming", "twitch", "esport", "game show", "gamer"], "Gaming"),
+        (&["comedy", "funny", "laugh", "humor", "stand-up", "standup",
+            "sitcom"], "Entertainment"),
+        (&["drama", "series", "soap", "telenovela", "serial"], "Entertainment"),
+    ];
+
+    for (keywords, category) in RULES {
+        for kw in *keywords {
+            if lower.contains(kw) {
+                return category.to_string();
+            }
+        }
+    }
+
+    "General".to_string()
+}
+
 /// Filter and map raw IPTV streams into plugin Stream objects.
 /// Only keeps entries that have a title and a .m3u8 URL.
 pub(crate) fn process_streams(raw: &[IptvStream]) -> Vec<Stream> {
@@ -260,12 +321,13 @@ pub(crate) fn process_streams(raw: &[IptvStream]) -> Vec<Stream> {
 
         let tags = build_tags(&entry.quality, &entry.label);
         let id = make_stream_id(i);
+        let group = categorize_title(&name);
 
         streams.push(Stream {
             id,
             name,
             url,
-            group: "Live TV".to_string(),
+            group,
             logo: String::new(),
             vod_type: "live".to_string(),
             tags,
@@ -303,6 +365,7 @@ pub extern "C" fn describe() -> u64 {
 const STREAMS_URL: &str = "https://iptv-org.github.io/api/streams.json";
 const CACHE_KEY: &str = "iptvorg_streams_json";
 
+#[cfg(not(test))]
 #[no_mangle]
 pub extern "C" fn refresh(config_ptr: u32, config_len: u32) -> u64 {
     let _ = read_input(config_ptr, config_len);

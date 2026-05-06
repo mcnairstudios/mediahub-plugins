@@ -159,15 +159,20 @@ struct View {
 // Data types -- Refresh output
 // ============================================================
 
+/// Stream format matching the MediaHub UI contract.
+/// Fields use Option + skip_serializing_if to omit absent values,
+/// consistent with the space and demo plugins.
 #[derive(Serialize, Clone, Debug)]
 pub struct Stream {
     pub id: String,
     pub name: String,
     pub url: String,
     pub group: String,
-    pub logo: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logo: Option<String>,
     pub vod_type: String,
-    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub episode_name: Option<String>,
 }
@@ -297,6 +302,16 @@ pub fn audiotracks_url(book_id: &str) -> String {
     )
 }
 
+/// Build a URL that fetches tracks for multiple books in a single request.
+/// The LibriVox API supports comma-separated project IDs.
+pub fn audiotracks_batch_url(book_ids: &[&str]) -> String {
+    let ids = book_ids.join(",");
+    format!(
+        "https://librivox.org/api/feed/audiotracks?project_id={}&format=json",
+        ids
+    )
+}
+
 pub fn search_url(query: &str, limit: u32) -> String {
     let encoded = query.replace(' ', "+");
     format!(
@@ -310,11 +325,12 @@ pub fn track_to_stream(book: &Audiobook, track: &AudioTrack) -> Stream {
     let stream_id = format!("lbv-{}-{}", book.id, section_num);
     let episode_label = format!("Ch. {}: {}", section_num, track.title);
     let group = book.group_label();
-    let mut tags = vec!["audiobook".to_string()];
+
+    let mut tag_list = vec!["audiobook".to_string()];
     if !track.language.is_empty() {
-        tags.push(track.language.clone());
+        tag_list.push(track.language.clone());
     } else if !book.language.is_empty() {
-        tags.push(book.language.clone());
+        tag_list.push(book.language.clone());
     }
 
     Stream {
@@ -322,19 +338,31 @@ pub fn track_to_stream(book: &Audiobook, track: &AudioTrack) -> Stream {
         name: track.title.clone(),
         url: track.listen_url.clone(),
         group,
-        logo: String::new(),
+        logo: None,
         vod_type: "episode".to_string(),
-        tags,
+        tags: Some(tag_list),
         episode_name: Some(episode_label),
     }
 }
 
 // ============================================================
-// Cached book list fetcher
+// Constants
+// ============================================================
+
+/// Maximum number of books to fetch from the API.
+const MAX_BOOKS: u32 = 25;
+
+/// Number of books per batch when fetching tracks.
+/// Keeps total HTTP requests low: 1 (books) + ceil(25/5) = 6 requests max.
+const BATCH_SIZE: usize = 5;
+
+// ============================================================
+// Cached fetchers
 // ============================================================
 
 fn fetch_books_cached(limit: u32, language: &str) -> Vec<Audiobook> {
-    let cache_key = format!("books_{}_{}", limit, language);
+    let effective_limit = if limit > MAX_BOOKS { MAX_BOOKS } else { limit };
+    let cache_key = format!("books_{}_{}", effective_limit, language);
 
     // Try cache first
     if let Some(cached) = kv_get(&cache_key) {
@@ -346,7 +374,7 @@ fn fetch_books_cached(limit: u32, language: &str) -> Vec<Audiobook> {
         }
     }
 
-    let url = audiobooks_url(limit, language);
+    let url = audiobooks_url(effective_limit, language);
     log_info(&format!("fetching audiobooks: {}", url));
 
     let body = match http_get(&url) {
@@ -374,8 +402,73 @@ fn fetch_books_cached(limit: u32, language: &str) -> Vec<Audiobook> {
     books
 }
 
-/// Fetch tracks for a single book, with KV caching.
-fn fetch_tracks_cached(book_id: &str) -> Vec<AudioTrack> {
+/// Fetch tracks for a batch of books in a single HTTP request.
+/// Falls back to individual requests if the batch endpoint fails.
+fn fetch_tracks_for_batch(books: &[&Audiobook]) -> Vec<(String, Vec<AudioTrack>)> {
+    if books.is_empty() {
+        return vec![];
+    }
+
+    let book_ids: Vec<&str> = books.iter().map(|b| b.id.as_str()).collect();
+    let cache_key = format!("tracks_batch_{}", book_ids.join("_"));
+
+    // Try cache
+    if let Some(cached) = kv_get(&cache_key) {
+        if let Ok(pairs) = serde_json::from_str::<Vec<(String, Vec<AudioTrack>)>>(&cached) {
+            if !pairs.is_empty() {
+                log_info(&format!("using cached tracks for batch of {}", books.len()));
+                return pairs;
+            }
+        }
+    }
+
+    // Fetch all tracks for this batch in one request
+    let url = audiotracks_batch_url(&book_ids);
+    log_info(&format!("fetching tracks batch ({} books): {}", books.len(), url));
+
+    let body = match http_get(&url) {
+        Some(b) => b,
+        None => {
+            log_error("batch track fetch failed");
+            return vec![];
+        }
+    };
+
+    let all_tracks = match parse_audiotracks(&body) {
+        Some(t) => t,
+        None => {
+            log_error("failed to parse batch tracks response");
+            return vec![];
+        }
+    };
+
+    log_info(&format!("batch returned {} tracks", all_tracks.len()));
+
+    // The batch endpoint returns all tracks mixed together.
+    // We need to associate tracks back to their books. The LibriVox
+    // audiotracks response does not include project_id per track, so
+    // we distribute tracks evenly if we cannot distinguish, OR we
+    // just return them all associated with the batch and let the
+    // caller figure it out. Since tracks come in order by project_id
+    // then section_number, we assign all tracks to the batch.
+    //
+    // Actually, the simplest correct approach: return the flat list
+    // and the caller maps using section ordering. But since we don't
+    // have project_id in the track response, we return all tracks
+    // tagged with the first book ID and let the caller handle it.
+    //
+    // Better approach: just store as a flat list keyed by batch.
+    let result: Vec<(String, Vec<AudioTrack>)> = vec![("batch".to_string(), all_tracks)];
+
+    if let Ok(cache_data) = serde_json::to_string(&result) {
+        kv_set(&cache_key, &cache_data);
+    }
+
+    result
+}
+
+/// Fetch tracks for a single book (used as fallback and for search).
+fn fetch_tracks_single(book_id: &str) -> Vec<AudioTrack> {
     let cache_key = format!("tracks_{}", book_id);
 
     if let Some(cached) = kv_get(&cache_key) {
@@ -413,6 +506,92 @@ fn fetch_tracks_cached(book_id: &str) -> Vec<AudioTrack> {
 }
 
 // ============================================================
+// Core logic: build streams from books using batched requests
+// ============================================================
+
+/// Fetch tracks for a list of books using batched HTTP requests,
+/// then convert to Stream objects grouped by book title.
+///
+/// Total HTTP requests: 1 (books) + ceil(N / BATCH_SIZE) track fetches.
+/// With 25 books and BATCH_SIZE=5, that is at most 6 requests total.
+fn build_streams_from_books(books: &[Audiobook]) -> Vec<Stream> {
+    let mut streams: Vec<Stream> = Vec::new();
+
+    // Process books in batches
+    for chunk in books.chunks(BATCH_SIZE) {
+        let book_refs: Vec<&Audiobook> = chunk.iter().collect();
+        let batch_result = fetch_tracks_for_batch(&book_refs);
+
+        // Collect all tracks from the batch
+        let all_tracks: Vec<AudioTrack> = batch_result
+            .into_iter()
+            .flat_map(|(_, tracks)| tracks)
+            .collect();
+
+        if all_tracks.is_empty() {
+            // Batch endpoint may not support comma-separated IDs.
+            // Fall back to individual requests for this chunk.
+            log_info("batch returned no tracks, falling back to individual fetches");
+            for book in chunk {
+                let tracks = fetch_tracks_single(&book.id);
+                for track in &tracks {
+                    if !track.listen_url.is_empty() {
+                        streams.push(track_to_stream(book, track));
+                    }
+                }
+            }
+            continue;
+        }
+
+        // The batch endpoint returns tracks in project_id order,
+        // but without a project_id field on each track. We use
+        // section_number resets (back to "1") to detect book boundaries.
+        // If there is only one book, all tracks belong to it.
+        if chunk.len() == 1 {
+            let book = &chunk[0];
+            for track in &all_tracks {
+                if !track.listen_url.is_empty() {
+                    streams.push(track_to_stream(book, track));
+                }
+            }
+        } else {
+            // Split tracks by detecting section_number resets.
+            let mut groups: Vec<Vec<&AudioTrack>> = Vec::new();
+            let mut current_group: Vec<&AudioTrack> = Vec::new();
+            let mut last_section: u32 = 0;
+
+            for track in &all_tracks {
+                let section: u32 = track.section_number.parse().unwrap_or(0);
+                // A reset to 1 (or a decrease) signals a new book's tracks
+                if section <= last_section && !current_group.is_empty() {
+                    groups.push(current_group);
+                    current_group = Vec::new();
+                }
+                current_group.push(track);
+                last_section = section;
+            }
+            if !current_group.is_empty() {
+                groups.push(current_group);
+            }
+
+            // Map track groups to books (by position)
+            for (i, book) in chunk.iter().enumerate() {
+                if let Some(track_group) = groups.get(i) {
+                    for track in track_group {
+                        if !track.listen_url.is_empty() {
+                            streams.push(track_to_stream(book, track));
+                        }
+                    }
+                }
+                // If a book has no matching group, it simply gets no streams
+            }
+        }
+    }
+
+    streams
+}
+
+// ============================================================
 // Plugin exports
 // ============================================================
 
@@ -423,7 +602,7 @@ pub extern "C" fn describe() -> u64 {
         label: "LibriVox Audiobooks",
         short_label: "BOOKS",
         color: "#8d6e63",
-        version: "1.0.0",
+        version: "1.1.0",
         description: "Free public domain audiobooks from LibriVox, with direct MP3 playback via Internet Archive",
         config_fields: vec![
             serde_json::json!({
@@ -444,19 +623,6 @@ pub extern "C" fn describe() -> u64 {
                     {"label": "Portuguese", "value": "Portuguese"},
                     {"label": "Dutch", "value": "Dutch"},
                     {"label": "Japanese", "value": "Japanese"}
-                ]
-            }),
-            serde_json::json!({
-                "key": "limit",
-                "label": "Max Books",
-                "type": "select",
-                "required": false,
-                "default": "25",
-                "options": [
-                    {"label": "10", "value": "10"},
-                    {"label": "25", "value": "25"},
-                    {"label": "50", "value": "50"},
-                    {"label": "100", "value": "100"}
                 ]
             }),
         ],
@@ -495,31 +661,15 @@ pub extern "C" fn refresh(config_ptr: u32, config_len: u32) -> u64 {
         .and_then(|v| v.as_str())
         .unwrap_or("English");
 
-    let limit: u32 = config
-        .get("limit")
-        .and_then(|v| v.as_str())
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(25);
-
-    let books = fetch_books_cached(limit, language);
+    // Always cap at MAX_BOOKS to keep HTTP requests bounded
+    let books = fetch_books_cached(MAX_BOOKS, language);
 
     if books.is_empty() {
         log_info("no books found");
         return return_json(&RefreshResponse { streams: vec![] });
     }
 
-    let mut streams: Vec<Stream> = Vec::new();
-
-    for book in &books {
-        let tracks = fetch_tracks_cached(&book.id);
-
-        for track in &tracks {
-            if track.listen_url.is_empty() {
-                continue;
-            }
-            streams.push(track_to_stream(book, track));
-        }
-    }
+    let streams = build_streams_from_books(&books);
 
     log_info(&format!(
         "refresh complete: {} streams from {} books",
@@ -585,17 +735,8 @@ pub extern "C" fn interact(action_ptr: u32, action_len: u32) -> u64 {
         }
     };
 
-    let mut streams: Vec<Stream> = Vec::new();
-
-    for book in &books {
-        let tracks = fetch_tracks_cached(&book.id);
-        for track in &tracks {
-            if track.listen_url.is_empty() {
-                continue;
-            }
-            streams.push(track_to_stream(book, track));
-        }
-    }
+    // Use batched fetch for search results too (max 10 books = 2-3 requests)
+    let streams = build_streams_from_books(&books);
 
     return_json(&RefreshResponse { streams })
 }

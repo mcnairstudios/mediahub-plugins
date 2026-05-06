@@ -1,11 +1,13 @@
 .PHONY: all clean test demo space radiogarden trailers \
 	iptvorg somafm radiobrowser librivox aerials nasa peertube trending \
 	archive oldtimeradio publicdomain ccmixter outdoorcams naturecams \
-	podcasts plutotv skylinecams slowtv operavision trafficcams
+	podcasts plutotv skylinecams slowtv operavision trafficcams ted openmhz \
+	sciencetube cartoons worldnews
 
 RUST_PLUGINS = space radiogarden iptvorg somafm radiobrowser librivox aerials nasa \
 	peertube trending archive oldtimeradio publicdomain ccmixter outdoorcams \
-	naturecams podcasts plutotv skylinecams slowtv operavision trafficcams
+	naturecams podcasts plutotv skylinecams slowtv operavision trafficcams ted openmhz \
+	sciencetube cartoons worldnews
 
 GO_PLUGINS = demo trailers
 
@@ -134,6 +136,26 @@ trafficcams:
 	cp plugins/trafficcams/target/wasm32-wasip1/release/trafficcams_rust.wasm dist/trafficcams.wasm
 	@echo "Built dist/trafficcams.wasm ($$(ls -la dist/trafficcams.wasm | awk '{print $$5}') bytes)"
 
+ted:
+	cd plugins/ted && cargo build --release --target wasm32-wasip1
+	cp plugins/ted/target/wasm32-wasip1/release/ted_rust.wasm dist/ted.wasm
+	@echo "Built dist/ted.wasm ($$(ls -la dist/ted.wasm | awk '{print $$5}') bytes)"
+
+openmhz:
+	cd plugins/openmhz && cargo build --release --target wasm32-wasip1
+	cp plugins/openmhz/target/wasm32-wasip1/release/openmhz_rust.wasm dist/openmhz.wasm
+	@echo "Built dist/openmhz.wasm ($$(ls -la dist/openmhz.wasm | awk '{print $$5}') bytes)"
+
+sciencetube:
+	cd plugins/sciencetube && cargo build --release --target wasm32-wasip1
+	cp plugins/sciencetube/target/wasm32-wasip1/release/sciencetube_rust.wasm dist/sciencetube.wasm
+	@echo "Built dist/sciencetube.wasm ($$(ls -la dist/sciencetube.wasm | awk '{print $$5}') bytes)"
+
+cartoons:
+	cd plugins/cartoons && cargo build --release --target wasm32-wasip1
+	cp plugins/cartoons/target/wasm32-wasip1/release/cartoons_rust.wasm dist/cartoons.wasm
+	@echo "Built dist/cartoons.wasm ($$(ls -la dist/cartoons.wasm | awk '{print $$5}') bytes)"
+
 # --- Test all Rust plugins ---
 
 test:
@@ -159,3 +181,8 @@ install:
 	@if [ -z "$(MEDIAHUB_PLUGINS_DIR)" ]; then echo "Set MEDIAHUB_PLUGINS_DIR"; exit 1; fi
 	cp dist/*.wasm $(MEDIAHUB_PLUGINS_DIR)/
 	@echo "Installed $$(ls dist/*.wasm | wc -l | tr -d ' ') plugins to $(MEDIAHUB_PLUGINS_DIR)"
+
+worldnews:
+	cd plugins/worldnews && cargo build --release --target wasm32-wasip1
+	cp plugins/worldnews/target/wasm32-wasip1/release/worldnews_rust.wasm dist/worldnews.wasm
+	@echo "Built dist/worldnews.wasm ($$(ls -la dist/worldnews.wasm | awk '{print $$5}') bytes)"

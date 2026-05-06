@@ -525,10 +525,20 @@ pub extern "C" fn refresh(config_ptr: u32, config_len: u32) -> u64 {
     let podcast_ids = parse_comma_list(&config, "podcast_ids");
     let limit = parse_limit(&config);
 
-    if searches.is_empty() && podcast_ids.is_empty() {
-        log_info("no search terms or podcast IDs configured");
-        return return_json(&RefreshResponse { streams: vec![] });
-    }
+    // If no user config provided, use sensible defaults that return 100+ episodes
+    let use_default_searches = searches.is_empty() && podcast_ids.is_empty();
+    let searches = if use_default_searches {
+        log_info("no config provided, using default search terms");
+        vec![
+            "true crime".to_string(),
+            "tech news".to_string(),
+            "comedy podcast".to_string(),
+            "science".to_string(),
+            "history".to_string(),
+        ]
+    } else {
+        searches
+    };
 
     let mut all_streams: Vec<Stream> = Vec::new();
 

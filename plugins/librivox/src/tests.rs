@@ -262,6 +262,24 @@ fn test_audiotracks_url() {
 }
 
 #[test]
+fn test_audiotracks_batch_url() {
+    let url = audiotracks_batch_url(&["123", "456", "789"]);
+    assert_eq!(
+        url,
+        "https://librivox.org/api/feed/audiotracks?project_id=123,456,789&format=json"
+    );
+}
+
+#[test]
+fn test_audiotracks_batch_url_single() {
+    let url = audiotracks_batch_url(&["42"]);
+    assert_eq!(
+        url,
+        "https://librivox.org/api/feed/audiotracks?project_id=42&format=json"
+    );
+}
+
+#[test]
 fn test_search_url() {
     let url = search_url("tale of two", 10);
     assert_eq!(
@@ -324,8 +342,11 @@ fn test_track_to_stream_basic() {
         stream.episode_name,
         Some("Ch. 1: The Period".to_string())
     );
-    assert!(stream.tags.contains(&"audiobook".to_string()));
-    assert!(stream.tags.contains(&"English".to_string()));
+    // logo should be None (omitted in serialization)
+    assert!(stream.logo.is_none());
+    let tags = stream.tags.as_ref().expect("tags should be Some");
+    assert!(tags.contains(&"audiobook".to_string()));
+    assert!(tags.contains(&"English".to_string()));
 }
 
 #[test]
@@ -356,8 +377,9 @@ fn test_track_to_stream_falls_back_to_book_language() {
     let stream = track_to_stream(&book, &track);
     assert_eq!(stream.id, "lbv-456-5");
     assert_eq!(stream.group, "Les Miserables - Victor Hugo");
-    assert!(stream.tags.contains(&"French".to_string()));
-    assert!(stream.tags.contains(&"audiobook".to_string()));
+    let tags = stream.tags.as_ref().expect("tags should be Some");
+    assert!(tags.contains(&"French".to_string()));
+    assert!(tags.contains(&"audiobook".to_string()));
 }
 
 #[test]
@@ -403,9 +425,9 @@ fn test_stream_serialization() {
         name: "Chapter One".to_string(),
         url: "https://archive.org/download/test/ch01.mp3".to_string(),
         group: "Test Book - Test Author".to_string(),
-        logo: String::new(),
+        logo: None,
         vod_type: "episode".to_string(),
-        tags: vec!["audiobook".to_string(), "English".to_string()],
+        tags: Some(vec!["audiobook".to_string(), "English".to_string()]),
         episode_name: Some("Ch. 1: Chapter One".to_string()),
     };
 
@@ -414,6 +436,10 @@ fn test_stream_serialization() {
     assert_eq!(json["name"], "Chapter One");
     assert_eq!(json["vod_type"], "episode");
     assert_eq!(json["episode_name"], "Ch. 1: Chapter One");
+    // logo should be absent when None
+    assert!(json.get("logo").is_none());
+    // tags should be present
+    assert!(json.get("tags").is_some());
 }
 
 #[test]
@@ -423,15 +449,35 @@ fn test_stream_serialization_no_episode_name() {
         name: "Chapter One".to_string(),
         url: "https://archive.org/download/test/ch01.mp3".to_string(),
         group: "Test Book - Test Author".to_string(),
-        logo: String::new(),
+        logo: None,
         vod_type: "episode".to_string(),
-        tags: vec!["audiobook".to_string()],
+        tags: Some(vec!["audiobook".to_string()]),
         episode_name: None,
     };
 
     let json = serde_json::to_value(&stream).expect("should serialize");
     // episode_name should be absent when None due to skip_serializing_if
     assert!(json.get("episode_name").is_none());
+    // logo should also be absent
+    assert!(json.get("logo").is_none());
+}
+
+#[test]
+fn test_stream_serialization_no_tags() {
+    let stream = Stream {
+        id: "lbv-1-1".to_string(),
+        name: "Chapter One".to_string(),
+        url: "https://archive.org/download/test/ch01.mp3".to_string(),
+        group: "Test Book - Test Author".to_string(),
+        logo: None,
+        vod_type: "episode".to_string(),
+        tags: None,
+        episode_name: None,
+    };
+
+    let json = serde_json::to_value(&stream).expect("should serialize");
+    // tags should be absent when None
+    assert!(json.get("tags").is_none());
 }
 
 // ============================================================

@@ -237,23 +237,25 @@ fn test_process_streams_filters_and_maps() {
     assert_eq!(streams[0].id, "iptv-0");
     assert_eq!(streams[0].name, "Bloomberg TV");
     assert_eq!(streams[0].url, "https://example.com/bloomberg/stream.m3u8");
-    assert_eq!(streams[0].group, "Live TV");
+    assert_eq!(streams[0].group, "General");
     assert_eq!(streams[0].vod_type, "live");
     assert_eq!(streams[0].tags, vec!["1080p"]);
     assert_eq!(streams[0].logo, "");
 
-    // Verify Al Jazeera English (quality + label tags)
+    // Verify Al Jazeera English (quality + label tags) -- "al jazeera" matches News
     assert_eq!(streams[1].id, "iptv-1");
     assert_eq!(streams[1].name, "Al Jazeera English");
+    assert_eq!(streams[1].group, "News");
     assert_eq!(
         streams[1].url,
         "https://example.com/aljazeera/live.m3u8?token=abc"
     );
     assert_eq!(streams[1].tags, vec!["720p", "geo-blocked"]);
 
-    // Verify France 24 (label tag only, no quality)
+    // Verify France 24 (label tag only, no quality) -- "france 24" matches News
     assert_eq!(streams[2].id, "iptv-5");
     assert_eq!(streams[2].name, "France 24");
+    assert_eq!(streams[2].group, "News");
     assert_eq!(streams[2].tags, vec!["not 24/7"]);
 }
 
@@ -334,7 +336,7 @@ fn test_process_streams_preserves_all_hls() {
 }
 
 #[test]
-fn test_process_streams_group_is_always_live_tv() {
+fn test_process_streams_uncategorized_gets_general() {
     let raw = vec![IptvStream {
         channel: None,
         feed: None,
@@ -347,7 +349,62 @@ fn test_process_streams_group_is_always_live_tv() {
     }];
     let streams = process_streams(&raw);
     assert_eq!(streams.len(), 1);
-    assert_eq!(streams[0].group, "Live TV");
+    assert_eq!(streams[0].group, "General");
+}
+
+// ============================================================
+// Title categorization tests
+// ============================================================
+
+#[test]
+fn test_categorize_news() {
+    assert_eq!(categorize_title("CNN International"), "News");
+    assert_eq!(categorize_title("BBC News World"), "News");
+    assert_eq!(categorize_title("Al Jazeera English"), "News");
+    assert_eq!(categorize_title("France 24"), "News");
+    assert_eq!(categorize_title("Euronews"), "News");
+}
+
+#[test]
+fn test_categorize_sports() {
+    assert_eq!(categorize_title("ESPN Live"), "Sports");
+    assert_eq!(categorize_title("Football Channel"), "Sports");
+    assert_eq!(categorize_title("NBA TV"), "Sports");
+    assert_eq!(categorize_title("Deportes TV"), "Sports");
+}
+
+#[test]
+fn test_categorize_movies() {
+    assert_eq!(categorize_title("Action Hollywood Movies"), "Movies");
+    assert_eq!(categorize_title("Cinema Classic"), "Movies");
+    assert_eq!(categorize_title("Bollywood HD"), "Movies");
+}
+
+#[test]
+fn test_categorize_music() {
+    assert_eq!(categorize_title("MTV Hits"), "Music");
+    assert_eq!(categorize_title("Jazz FM Live"), "Music");
+    assert_eq!(categorize_title("Music Channel"), "Music");
+}
+
+#[test]
+fn test_categorize_kids() {
+    assert_eq!(categorize_title("Cartoon Network"), "Kids");
+    assert_eq!(categorize_title("Disney Junior"), "Kids");
+    assert_eq!(categorize_title("Nickelodeon"), "Kids");
+}
+
+#[test]
+fn test_categorize_documentary() {
+    assert_eq!(categorize_title("Discovery Channel"), "Documentary");
+    assert_eq!(categorize_title("National Geographic"), "Documentary");
+    assert_eq!(categorize_title("History Channel"), "Documentary");
+}
+
+#[test]
+fn test_categorize_general_fallback() {
+    assert_eq!(categorize_title("Random Channel XYZ"), "General");
+    assert_eq!(categorize_title("WBST TV"), "General");
 }
 
 // ============================================================
@@ -360,7 +417,7 @@ fn test_stream_serialization() {
         id: "iptv-0".to_string(),
         name: "Test Channel".to_string(),
         url: "https://example.com/live.m3u8".to_string(),
-        group: "Live TV".to_string(),
+        group: "General".to_string(),
         logo: "".to_string(),
         vod_type: "live".to_string(),
         tags: vec!["1080p".to_string()],
@@ -370,7 +427,7 @@ fn test_stream_serialization() {
     assert_eq!(json["id"], "iptv-0");
     assert_eq!(json["name"], "Test Channel");
     assert_eq!(json["url"], "https://example.com/live.m3u8");
-    assert_eq!(json["group"], "Live TV");
+    assert_eq!(json["group"], "General");
     assert_eq!(json["logo"], "");
     assert_eq!(json["vod_type"], "live");
     assert_eq!(json["tags"], serde_json::json!(["1080p"]));
@@ -382,7 +439,7 @@ fn test_stream_roundtrip() {
         id: "iptv-5".to_string(),
         name: "France 24".to_string(),
         url: "https://example.com/france24.m3u8".to_string(),
-        group: "Live TV".to_string(),
+        group: "News".to_string(),
         logo: "".to_string(),
         vod_type: "live".to_string(),
         tags: vec!["720p".to_string(), "not 24/7".to_string()],

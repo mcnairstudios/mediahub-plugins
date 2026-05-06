@@ -66,7 +66,6 @@ fn test_parse_search_response_invalid_json() {
 
 #[test]
 fn test_parse_search_response_missing_fields() {
-    // Missing optional fields should default to empty strings
     let json = r#"{
         "response": {
             "docs": [
@@ -83,123 +82,6 @@ fn test_parse_search_response_missing_fields() {
     assert_eq!(docs[0].title, "");
     assert_eq!(docs[0].description, "");
     assert_eq!(docs[0].creator, "");
-}
-
-// ============================================================
-// Metadata parsing tests
-// ============================================================
-
-#[test]
-fn test_parse_metadata_mp3s_filters_correctly() {
-    let json = r#"{
-        "files": [
-            {"name": "episode1.mp3", "format": "VBR MP3", "title": "Episode 1"},
-            {"name": "episode2.mp3", "format": "VBR MP3", "title": "Episode 2"},
-            {"name": "metadata.xml", "format": "Metadata", "title": ""},
-            {"name": "episode1.ogg", "format": "Ogg Vorbis", "title": "Episode 1"},
-            {"name": "cover.jpg", "format": "JPEG", "title": ""},
-            {"name": "episode3.mp3", "format": "VBR MP3", "title": ""}
-        ]
-    }"#;
-
-    let mp3s = parse_metadata_mp3s(json.as_bytes()).unwrap();
-    assert_eq!(mp3s.len(), 3);
-    assert_eq!(mp3s[0].name, "episode1.mp3");
-    assert_eq!(mp3s[0].format, "VBR MP3");
-    assert_eq!(mp3s[0].title, "Episode 1");
-    assert_eq!(mp3s[1].name, "episode2.mp3");
-    assert_eq!(mp3s[2].name, "episode3.mp3");
-    assert_eq!(mp3s[2].title, "");
-}
-
-#[test]
-fn test_parse_metadata_mp3s_no_mp3s() {
-    let json = r#"{
-        "files": [
-            {"name": "episode.ra", "format": "RealAudio", "title": "Old format"},
-            {"name": "metadata.xml", "format": "Metadata", "title": ""}
-        ]
-    }"#;
-
-    let mp3s = parse_metadata_mp3s(json.as_bytes()).unwrap();
-    assert!(mp3s.is_empty());
-}
-
-#[test]
-fn test_parse_metadata_mp3s_empty_files() {
-    let json = r#"{"files": []}"#;
-    let mp3s = parse_metadata_mp3s(json.as_bytes()).unwrap();
-    assert!(mp3s.is_empty());
-}
-
-#[test]
-fn test_parse_metadata_mp3s_invalid_json() {
-    let result = parse_metadata_mp3s(b"garbage");
-    assert!(result.is_none());
-}
-
-#[test]
-fn test_parse_metadata_missing_format_field() {
-    // Files with missing format should default to empty string and be filtered out
-    let json = r#"{
-        "files": [
-            {"name": "episode1.mp3", "title": "Episode 1"},
-            {"name": "episode2.mp3", "format": "VBR MP3", "title": "Episode 2"}
-        ]
-    }"#;
-
-    let mp3s = parse_metadata_mp3s(json.as_bytes()).unwrap();
-    assert_eq!(mp3s.len(), 1);
-    assert_eq!(mp3s[0].name, "episode2.mp3");
-}
-
-// ============================================================
-// Episode name extraction tests
-// ============================================================
-
-#[test]
-fn test_episode_name_simple() {
-    assert_eq!(
-        episode_name_from_filename("Billy the Kid.mp3"),
-        "Billy the Kid"
-    );
-}
-
-#[test]
-fn test_episode_name_with_show_prefix() {
-    assert_eq!(
-        episode_name_from_filename("Gunsmoke 52-04-26 (001) Billy the Kid.mp3"),
-        "Gunsmoke 52-04-26 (001) Billy the Kid"
-    );
-}
-
-#[test]
-fn test_episode_name_percent_encoded() {
-    assert_eq!(
-        episode_name_from_filename("Gunsmoke%2052-04-26%20(001)%20Billy%20the%20Kid.mp3"),
-        "Gunsmoke 52-04-26 (001) Billy the Kid"
-    );
-}
-
-#[test]
-fn test_episode_name_uppercase_extension() {
-    assert_eq!(
-        episode_name_from_filename("Episode Title.MP3"),
-        "Episode Title"
-    );
-}
-
-#[test]
-fn test_episode_name_no_extension() {
-    assert_eq!(
-        episode_name_from_filename("no_extension_here"),
-        "no_extension_here"
-    );
-}
-
-#[test]
-fn test_episode_name_empty() {
-    assert_eq!(episode_name_from_filename(""), "");
 }
 
 // ============================================================
@@ -228,7 +110,6 @@ fn test_percent_decode_special_chars() {
 
 #[test]
 fn test_percent_decode_incomplete_sequence() {
-    // Incomplete percent sequence should be left as-is
     assert_eq!(percent_decode("abc%2"), "abc%2");
 }
 
@@ -255,35 +136,79 @@ fn test_url_encode_path_no_encoding_needed() {
 }
 
 // ============================================================
-// Group derivation tests
+// Group derivation tests -- now uses show-name matching
 // ============================================================
 
 #[test]
-fn test_derive_group_with_creator() {
+fn test_derive_group_matches_gunsmoke_in_identifier() {
     let doc = IASearchDoc {
-        identifier: "test".to_string(),
+        identifier: "OTRR_Gunsmoke_Singles".to_string(),
         title: "Some Title".to_string(),
         description: String::new(),
         creator: "CBS Radio".to_string(),
     };
-    assert_eq!(derive_group(&doc), "CBS Radio");
+    assert_eq!(derive_group(&doc), "Gunsmoke");
 }
 
 #[test]
-fn test_derive_group_no_creator_uses_title() {
+fn test_derive_group_matches_dragnet_in_identifier() {
     let doc = IASearchDoc {
-        identifier: "test".to_string(),
-        title: "Gunsmoke Collection".to_string(),
+        identifier: "OTRR_Dragnet_Singles".to_string(),
+        title: "Dragnet Collection".to_string(),
+        description: String::new(),
+        creator: "NBC Radio".to_string(),
+    };
+    assert_eq!(derive_group(&doc), "Dragnet");
+}
+
+#[test]
+fn test_derive_group_matches_suspense_in_title() {
+    let doc = IASearchDoc {
+        identifier: "some_random_id".to_string(),
+        title: "Suspense - The Killer".to_string(),
         description: String::new(),
         creator: String::new(),
     };
-    assert_eq!(derive_group(&doc), "Gunsmoke Collection");
+    assert_eq!(derive_group(&doc), "Suspense");
 }
 
 #[test]
-fn test_derive_group_no_creator_no_title() {
+fn test_derive_group_matches_shadow() {
     let doc = IASearchDoc {
-        identifier: "test".to_string(),
+        identifier: "TheShadow_1938_collection".to_string(),
+        title: "The Shadow Collection".to_string(),
+        description: String::new(),
+        creator: String::new(),
+    };
+    assert_eq!(derive_group(&doc), "The Shadow");
+}
+
+#[test]
+fn test_derive_group_falls_back_to_creator() {
+    let doc = IASearchDoc {
+        identifier: "unknown_show_123".to_string(),
+        title: "Some Random Title".to_string(),
+        description: String::new(),
+        creator: "ABC Radio".to_string(),
+    };
+    assert_eq!(derive_group(&doc), "ABC Radio");
+}
+
+#[test]
+fn test_derive_group_falls_back_to_title() {
+    let doc = IASearchDoc {
+        identifier: "unknown_show_123".to_string(),
+        title: "My Special Show".to_string(),
+        description: String::new(),
+        creator: String::new(),
+    };
+    assert_eq!(derive_group(&doc), "My Special Show");
+}
+
+#[test]
+fn test_derive_group_no_info() {
+    let doc = IASearchDoc {
+        identifier: "unknown_123".to_string(),
         title: String::new(),
         description: String::new(),
         creator: String::new(),
@@ -292,125 +217,90 @@ fn test_derive_group_no_creator_no_title() {
 }
 
 // ============================================================
-// Stream ID tests
+// Stream URL tests
 // ============================================================
 
 #[test]
-fn test_make_stream_id() {
+fn test_make_stream_url() {
     assert_eq!(
-        make_stream_id("OTRR_Gunsmoke_Singles", 0),
-        "OTRR_Gunsmoke_Singles__0000"
-    );
-    assert_eq!(
-        make_stream_id("OTRR_Gunsmoke_Singles", 42),
-        "OTRR_Gunsmoke_Singles__0042"
+        make_stream_url("OTRR_Gunsmoke_Singles"),
+        "https://archive.org/download/OTRR_Gunsmoke_Singles/OTRR_Gunsmoke_Singles_vbr.mp3"
     );
 }
 
 // ============================================================
-// Download URL tests
+// doc_to_stream tests
 // ============================================================
 
 #[test]
-fn test_make_download_url() {
-    assert_eq!(
-        make_download_url("OTRR_Gunsmoke_Singles", "Billy the Kid.mp3"),
-        "https://archive.org/download/OTRR_Gunsmoke_Singles/Billy%20the%20Kid.mp3"
-    );
-}
-
-#[test]
-fn test_make_download_url_no_spaces() {
-    assert_eq!(
-        make_download_url("item123", "episode.mp3"),
-        "https://archive.org/download/item123/episode.mp3"
-    );
-}
-
-// ============================================================
-// doc_to_streams integration test
-// ============================================================
-
-#[test]
-fn test_doc_to_streams_basic() {
+fn test_doc_to_stream_basic() {
     let doc = IASearchDoc {
         identifier: "OTRR_Gunsmoke_Singles".to_string(),
-        title: "Gunsmoke".to_string(),
+        title: "Gunsmoke Collection".to_string(),
         description: "Classic western".to_string(),
         creator: "CBS Radio".to_string(),
     };
 
-    let files = vec![
-        IAFile {
-            name: "Gunsmoke 52-04-26 (001) Billy the Kid.mp3".to_string(),
-            format: "VBR MP3".to_string(),
-            title: "Billy the Kid".to_string(),
-        },
-        IAFile {
-            name: "Gunsmoke 52-05-03 (002) Hot Rod.mp3".to_string(),
-            format: "VBR MP3".to_string(),
-            title: "".to_string(),
-        },
-    ];
-
-    let streams = doc_to_streams(&doc, &files);
-    assert_eq!(streams.len(), 2);
-
-    // First stream uses the title from the file metadata
-    assert_eq!(streams[0].id, "OTRR_Gunsmoke_Singles__0000");
-    assert_eq!(streams[0].name, "Billy the Kid");
-    assert_eq!(streams[0].group, "CBS Radio");
+    let stream = doc_to_stream(&doc);
+    assert_eq!(stream.id, "OTRR_Gunsmoke_Singles");
+    assert_eq!(stream.name, "Gunsmoke Collection");
+    assert_eq!(stream.group, "Gunsmoke"); // matched by show name
+    assert_eq!(stream.vod_type, "movie");
+    assert!(stream.url.contains("OTRR_Gunsmoke_Singles"));
+    assert!(stream.url.contains("_vbr.mp3"));
     assert_eq!(
-        streams[0].url,
-        "https://archive.org/download/OTRR_Gunsmoke_Singles/Gunsmoke%2052-04-26%20(001)%20Billy%20the%20Kid.mp3"
-    );
-    assert_eq!(
-        streams[0].logo.as_deref(),
+        stream.logo.as_deref(),
         Some("https://archive.org/services/img/OTRR_Gunsmoke_Singles")
     );
-    assert_eq!(streams[0].episode_name.as_deref(), Some("Billy the Kid"));
-    assert_eq!(streams[0].vod_type, "movie");
+    let tags = stream.tags.as_ref().unwrap();
+    assert!(tags.contains(&"radio".to_string()));
+    assert!(tags.contains(&"classic".to_string()));
+}
 
-    // Second stream falls back to filename-derived episode name
-    assert_eq!(streams[1].id, "OTRR_Gunsmoke_Singles__0001");
-    assert_eq!(streams[1].name, "Gunsmoke 52-05-03 (002) Hot Rod");
-    assert_eq!(
-        streams[1].episode_name.as_deref(),
-        Some("Gunsmoke 52-05-03 (002) Hot Rod")
+#[test]
+fn test_doc_to_stream_uses_identifier_when_no_title() {
+    let doc = IASearchDoc {
+        identifier: "mystery_item".to_string(),
+        title: String::new(),
+        description: String::new(),
+        creator: String::new(),
+    };
+
+    let stream = doc_to_stream(&doc);
+    assert_eq!(stream.name, "mystery_item");
+}
+
+#[test]
+fn test_doc_to_stream_unmatched_show_uses_creator() {
+    let doc = IASearchDoc {
+        identifier: "random_item_123".to_string(),
+        title: "Random Show".to_string(),
+        description: String::new(),
+        creator: "Some Network".to_string(),
+    };
+
+    let stream = doc_to_stream(&doc);
+    assert_eq!(stream.group, "Some Network");
+}
+
+// ============================================================
+// Known shows coverage test
+// ============================================================
+
+#[test]
+fn test_known_shows_has_many_entries() {
+    assert!(
+        KNOWN_SHOWS.len() >= 20,
+        "should have 20+ known show patterns, got {}",
+        KNOWN_SHOWS.len()
     );
 }
 
 #[test]
-fn test_doc_to_streams_empty_files() {
-    let doc = IASearchDoc {
-        identifier: "empty_item".to_string(),
-        title: "Empty".to_string(),
-        description: String::new(),
-        creator: String::new(),
-    };
-
-    let streams = doc_to_streams(&doc, &[]);
-    assert!(streams.is_empty());
-}
-
-#[test]
-fn test_doc_to_streams_tags() {
-    let doc = IASearchDoc {
-        identifier: "test".to_string(),
-        title: "Test".to_string(),
-        description: String::new(),
-        creator: String::new(),
-    };
-
-    let files = vec![IAFile {
-        name: "episode.mp3".to_string(),
-        format: "VBR MP3".to_string(),
-        title: "Episode".to_string(),
-    }];
-
-    let streams = doc_to_streams(&doc, &files);
-    assert_eq!(streams.len(), 1);
-    let tags = streams[0].tags.as_ref().unwrap();
-    assert!(tags.contains(&"radio".to_string()));
-    assert!(tags.contains(&"classic".to_string()));
+fn test_search_queries_defined() {
+    assert!(
+        SEARCH_QUERIES.len() >= 4,
+        "should have 4+ search queries for variety, got {}",
+        SEARCH_QUERIES.len()
+    );
 }

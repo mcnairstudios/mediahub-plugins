@@ -165,9 +165,11 @@ pub struct Stream {
     pub name: String,
     pub url: String,
     pub group: String,
-    pub logo: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logo: Option<String>,
     pub vod_type: String,
-    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -300,9 +302,9 @@ pub fn parse_camera(cam: &Value, district_num: u8) -> Option<Stream> {
         name,
         url: stream_url.to_string(),
         group,
-        logo: String::new(),
-        vod_type: String::new(),
-        tags,
+        logo: None,
+        vod_type: "live".to_string(),
+        tags: Some(tags),
     })
 }
 
@@ -428,7 +430,7 @@ fn search_cameras(query: &str) -> Vec<SearchResult> {
 
         let name_lower = stream.name.to_lowercase();
         let group_lower = stream.group.to_lowercase();
-        let tags_match = stream.tags.iter().any(|t| t.contains(&query_lower));
+        let tags_match = stream.tags.as_ref().map_or(false, |tags| tags.iter().any(|t| t.contains(&query_lower)));
 
         if name_lower.contains(&query_lower) || group_lower.contains(&query_lower) || tags_match {
             results.push(SearchResult {

@@ -54,6 +54,16 @@ fn test_truncate_long_string() {
     assert_eq!(truncate("hello world", 5), "hello...");
 }
 
+#[test]
+fn test_truncate_multibyte_utf8() {
+    // Should not panic on multi-byte characters
+    let s = "cafe\u{0301} au lait"; // "cafe\u{0301}" is e + combining accent
+    let result = truncate(s, 6);
+    assert!(result.ends_with("..."));
+    // Ensure it doesn't panic and produces valid UTF-8
+    assert!(result.is_char_boundary(0));
+}
+
 // ============================================================
 // piped_video_to_stream tests
 // ============================================================

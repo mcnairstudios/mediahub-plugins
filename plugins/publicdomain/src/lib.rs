@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::slice;
@@ -89,7 +91,7 @@ fn http_get(url: &str) -> Option<Vec<u8>> {
             url_bytes.as_ptr() as u32, url_bytes.len() as u32,
             method.as_ptr() as u32, method.len() as u32,
             headers.as_ptr() as u32, headers.len() as u32,
-            0, 0, // no body
+            0, 0,
         )
     };
 
@@ -175,15 +177,17 @@ struct RefreshResponse {
     streams: Vec<Stream>,
 }
 
-#[derive(Deserialize)]
-struct SearchResult {
-    identifier: String,
+#[derive(Deserialize, Debug, Clone)]
+pub(crate) struct SearchResult {
+    pub identifier: String,
     #[serde(default)]
-    title: Option<String>,
+    pub title: Option<String>,
     #[serde(default)]
-    description: Option<String>,
+    pub description: Option<String>,
     #[serde(default)]
-    year: Option<Value>,
+    pub year: Option<Value>,
+    #[serde(default)]
+    pub creator: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -204,6 +208,24 @@ struct InteractSearchResult {
 }
 
 // ============================================================
+// Decade-based search queries
+// ============================================================
+
+/// Search queries for different decades and genres, each producing a batch
+/// of results in a single HTTP request. Total: ~8 requests for 300-500 films.
+const DECADE_QUERIES: &[(&str, &str, u32)] = &[
+    // By decade -- feature_films collection with year ranges
+    ("collection:feature_films AND year:[1920 TO 1929]", "1920s", 40),
+    ("collection:feature_films AND year:[1930 TO 1939]", "1930s", 60),
+    ("collection:feature_films AND year:[1940 TO 1949]", "1940s", 60),
+    ("collection:feature_films AND year:[1950 TO 1959]", "1950s", 60),
+    ("collection:feature_films AND year:[1960 TO 1969]", "1960s", 50),
+    ("collection:feature_films AND year:[1970 TO 1979]", "1970s", 40),
+    // Catch-all for films without a year or other decades
+    ("collection:feature_films AND -year:[1920 TO 1979]", "Other", 50),
+];
+
+// ============================================================
 // Pure logic (testable without host calls)
 // ============================================================
 
@@ -213,7 +235,6 @@ pub(crate) fn extract_year(year_val: &Option<Value>) -> Option<u32> {
     match year_val {
         Some(Value::Number(n)) => n.as_u64().map(|y| y as u32),
         Some(Value::String(s)) => {
-            // Try parsing first 4 chars as a year
             if s.len() >= 4 {
                 s[..4].parse::<u32>().ok()
             } else {
@@ -232,7 +253,6 @@ pub(crate) fn year_to_decade(year: u32) -> String {
 
 /// Try to extract a year from a title string like "Millie (1931)".
 pub(crate) fn year_from_title(title: &str) -> Option<u32> {
-    // Look for a 4-digit year in parentheses
     if let Some(start) = title.rfind('(') {
         if let Some(end) = title[start..].find(')') {
             let candidate = &title[start + 1..start + end];
@@ -244,65 +264,10 @@ pub(crate) fn year_from_title(title: &str) -> Option<u32> {
     None
 }
 
-/// Select the best MP4/h.264 file from an Internet Archive metadata files array.
-/// Returns the filename if found.
-///
-/// Strategy:
-/// 1. Prefer files with format "h.264" (better codec, smaller size)
-/// 2. Fall back to format "MPEG4"
-/// 3. Among candidates, prefer the largest file (likely the full movie, not a clip)
-pub(crate) fn select_best_mp4(files: &[Value]) -> Option<String> {
-    let mut h264_files: Vec<(&str, f64)> = Vec::new();
-    let mut mpeg4_files: Vec<(&str, f64)> = Vec::new();
-
-    for file in files {
-        let name = match file.get("name").and_then(|n| n.as_str()) {
-            Some(n) => n,
-            None => continue,
-        };
-        let format = match file.get("format").and_then(|f| f.as_str()) {
-            Some(f) => f,
-            None => continue,
-        };
-
-        let size: f64 = file
-            .get("size")
-            .and_then(|s| {
-                // size can be a string or number
-                match s {
-                    Value::String(ss) => ss.parse::<f64>().ok(),
-                    Value::Number(n) => n.as_f64(),
-                    _ => None,
-                }
-            })
-            .unwrap_or(0.0);
-
-        match format {
-            "h.264" | "h.264 IA" | "H.264" | "h.264 HD" => {
-                h264_files.push((name, size));
-            }
-            "MPEG4" | "mpeg4" => {
-                mpeg4_files.push((name, size));
-            }
-            _ => {}
-        }
-    }
-
-    // Pick the largest h.264 file, or fall back to largest MPEG4
-    let pick_largest = |files: &[(&str, f64)]| -> Option<String> {
-        files
-            .iter()
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(name, _)| name.to_string())
-    };
-
-    if !h264_files.is_empty() {
-        pick_largest(&h264_files)
-    } else if !mpeg4_files.is_empty() {
-        pick_largest(&mpeg4_files)
-    } else {
-        None
-    }
+/// Build a heuristic download URL for a video item.
+/// The Internet Archive commonly derives an .mp4 file named `{identifier}.mp4`.
+pub(crate) fn heuristic_video_url(identifier: &str) -> String {
+    format!("https://archive.org/download/{}/{}.mp4", identifier, identifier)
 }
 
 /// Parse the Internet Archive search response JSON and extract items.
@@ -313,27 +278,20 @@ pub(crate) fn parse_search_response(data: &[u8]) -> Vec<SearchResult> {
     }
 }
 
-/// Build a stream from search result + metadata, returning None if no MP4 found.
-pub(crate) fn build_stream_from_metadata(
-    identifier: &str,
-    title: &str,
-    year_val: &Option<Value>,
-    files: &[Value],
-) -> Option<Stream> {
-    let filename = select_best_mp4(files)?;
+/// Build a stream from search result data using heuristic URL.
+/// No per-item metadata fetch required.
+pub(crate) fn build_stream_from_search(
+    item: &SearchResult,
+    default_group: &str,
+) -> Stream {
+    let identifier = &item.identifier;
+    let title = item.title.as_deref().unwrap_or(identifier);
 
-    // URL-encode the filename for the download URL
-    let encoded_filename = url_encode(&filename);
-    let url = format!(
-        "https://archive.org/download/{}/{}",
-        identifier, encoded_filename
-    );
-
-    let year = extract_year(year_val).or_else(|| year_from_title(title));
+    let year = extract_year(&item.year).or_else(|| year_from_title(title));
 
     let group = match year {
         Some(y) => year_to_decade(y),
-        None => "Unknown Decade".to_string(),
+        None => default_group.to_string(),
     };
 
     let year_str = year.map(|y| y.to_string());
@@ -345,7 +303,9 @@ pub(crate) fn build_stream_from_metadata(
         _ => title.to_string(),
     };
 
-    Some(Stream {
+    let url = heuristic_video_url(identifier);
+
+    Stream {
         id: identifier.to_string(),
         name: display_name,
         url,
@@ -354,7 +314,7 @@ pub(crate) fn build_stream_from_metadata(
         vod_type: "movie".to_string(),
         year: year_str,
         tags: Some(vec!["public domain".to_string()]),
-    })
+    }
 }
 
 /// Simple percent-encoding for URL path segments.
@@ -379,15 +339,7 @@ fn url_encode(input: &str) -> String {
     encoded
 }
 
-/// Build the search query URL for Internet Archive.
-fn build_search_url(max_films: u32) -> String {
-    format!(
-        "https://archive.org/advancedsearch.php?q=collection:feature_films+AND+format:(h.264)&fl=identifier,title,description,year&rows={}&sort=downloads+desc&output=json",
-        max_films
-    )
-}
-
-/// Parse max_films from config, with default of 50.
+/// Parse max_films from config, with default of 300.
 fn parse_max_films(config: &serde_json::Map<String, Value>) -> u32 {
     config
         .get("max_films")
@@ -396,7 +348,15 @@ fn parse_max_films(config: &serde_json::Map<String, Value>) -> u32 {
             Value::String(s) => s.parse::<u32>().ok(),
             _ => None,
         })
-        .unwrap_or(50)
+        .unwrap_or(300)
+}
+
+fn build_decade_search_url(query: &str, rows: u32) -> String {
+    let encoded_query = query.replace(' ', "+");
+    format!(
+        "https://archive.org/advancedsearch.php?q={}&fl[]=identifier&fl[]=title&fl[]=description&fl[]=year&fl[]=creator&sort=downloads+desc&rows={}&output=json",
+        encoded_query, rows
+    )
 }
 
 // ============================================================
@@ -410,14 +370,14 @@ pub extern "C" fn describe() -> u64 {
         label: "Public Domain Movies",
         short_label: "PD",
         color: "#8d6e63",
-        version: "1.0.0",
-        description: "Classic public domain feature films from Internet Archive",
+        version: "2.0.0",
+        description: "Classic public domain feature films from Internet Archive, grouped by decade",
         config_fields: vec![
             serde_json::json!({
                 "key": "max_films",
                 "label": "Max films to load",
                 "type": "number",
-                "default": 50
+                "default": 300
             }),
         ],
         view: View {
@@ -451,7 +411,7 @@ pub extern "C" fn refresh(config_ptr: u32, config_len: u32) -> u64 {
     };
 
     // Check KV cache first
-    if let Some(cached) = kv_get("streams_cache") {
+    if let Some(cached) = kv_get("pd_streams_cache_v2") {
         if let Ok(resp) = serde_json::from_str::<RefreshResponse>(&cached) {
             if !resp.streams.is_empty() {
                 log_info(&format!("returning {} cached streams", resp.streams.len()));
@@ -461,61 +421,53 @@ pub extern "C" fn refresh(config_ptr: u32, config_len: u32) -> u64 {
     }
 
     let max_films = parse_max_films(&config);
-    let url = build_search_url(max_films);
 
-    log_info(&format!("fetching search results: {}", url));
-
-    let body = match http_get(&url) {
-        Some(b) => b,
-        None => {
-            log_error("failed to fetch search results from archive.org");
-            return return_json(&RefreshResponse { streams: vec![] });
-        }
-    };
-
-    let items = parse_search_response(&body);
-    log_info(&format!("found {} items in search results", items.len()));
-
+    let mut seen = std::collections::HashSet::new();
     let mut streams: Vec<Stream> = Vec::new();
 
-    for item in &items {
-        let identifier = &item.identifier;
-        let title = item.title.as_deref().unwrap_or(identifier);
+    // Execute decade-based queries (one HTTP request per decade)
+    for &(query, default_group, rows) in DECADE_QUERIES {
+        if streams.len() >= max_films as usize {
+            break;
+        }
 
-        // Fetch metadata for this item to find the best MP4 file
-        let meta_url = format!("https://archive.org/metadata/{}", identifier);
-        let meta_body = match http_get(&meta_url) {
+        let url = build_decade_search_url(query, rows);
+        log_info(&format!("fetching: {}", url));
+
+        let body = match http_get(&url) {
             Some(b) => b,
             None => {
-                log_error(&format!("failed to fetch metadata for {}", identifier));
+                log_error(&format!("failed to fetch: {}", query));
                 continue;
             }
         };
 
-        let meta: Value = match serde_json::from_slice(&meta_body) {
-            Ok(v) => v,
-            Err(_) => {
-                log_error(&format!("failed to parse metadata for {}", identifier));
+        let items = parse_search_response(&body);
+        log_info(&format!("query returned {} items for {}", items.len(), default_group));
+
+        for item in &items {
+            if seen.contains(&item.identifier) {
                 continue;
             }
-        };
+            seen.insert(item.identifier.clone());
+            streams.push(build_stream_from_search(item, default_group));
 
-        let files = match meta.get("files").and_then(|f| f.as_array()) {
-            Some(f) => f.clone(),
-            None => continue,
-        };
-
-        if let Some(stream) = build_stream_from_metadata(identifier, title, &item.year, &files) {
-            streams.push(stream);
+            if streams.len() >= max_films as usize {
+                break;
+            }
         }
     }
 
-    log_info(&format!("built {} streams total", streams.len()));
+    log_info(&format!(
+        "refresh complete: {} streams from {} HTTP requests",
+        streams.len(),
+        DECADE_QUERIES.len()
+    ));
 
     // Cache results
     let resp = RefreshResponse { streams };
     if let Ok(cache_data) = serde_json::to_string(&resp) {
-        kv_set("streams_cache", &cache_data);
+        kv_set("pd_streams_cache_v2", &cache_data);
     }
 
     return_json(&resp)
@@ -554,10 +506,10 @@ pub extern "C" fn interact(action_ptr: u32, action_len: u32) -> u64 {
         return return_json(&serde_json::json!({ "results": empty }));
     }
 
-    // Search Internet Archive with the user's query
+    // Search Internet Archive with the user's query -- single HTTP request
     let encoded_query = url_encode(query);
     let search_url = format!(
-        "https://archive.org/advancedsearch.php?q=collection:feature_films+AND+format:(h.264)+AND+title:({})&fl=identifier,title,description,year&rows=20&sort=downloads+desc&output=json",
+        "https://archive.org/advancedsearch.php?q=collection:feature_films+AND+title:({})&fl[]=identifier&fl[]=title&fl[]=description&fl[]=year&fl[]=creator&rows=20&sort=downloads+desc&output=json",
         encoded_query
     );
 

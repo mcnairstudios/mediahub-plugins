@@ -236,11 +236,17 @@ fn extract_video_id(url_path: &str) -> Option<String> {
 }
 
 /// Truncate a string to at most `max_len` characters, appending "..." if truncated.
+/// Uses char boundaries to avoid panicking on multi-byte UTF-8.
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+    if s.chars().count() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len])
+        let end: usize = s
+            .char_indices()
+            .nth(max_len)
+            .map(|(idx, _)| idx)
+            .unwrap_or(s.len());
+        format!("{}...", &s[..end])
     }
 }
 

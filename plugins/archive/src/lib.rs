@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::slice;
@@ -201,6 +203,12 @@ const KNOWN_COLLECTIONS: &[CollectionInfo] = &[
     CollectionInfo { id: "silent_films", display_name: "Silent Films", media_type: MediaType::Video },
     CollectionInfo { id: "film_noir", display_name: "Film Noir", media_type: MediaType::Video },
     CollectionInfo { id: "scifi", display_name: "Sci-Fi Films", media_type: MediaType::Video },
+    CollectionInfo { id: "comedy_films", display_name: "Comedy Films", media_type: MediaType::Video },
+    CollectionInfo { id: "horror_movies", display_name: "Horror Movies", media_type: MediaType::Video },
+    CollectionInfo { id: "anime", display_name: "Anime", media_type: MediaType::Video },
+    CollectionInfo { id: "classic_cartoons", display_name: "Classic Cartoons", media_type: MediaType::Video },
+    CollectionInfo { id: "noir", display_name: "Noir Classics", media_type: MediaType::Video },
+    CollectionInfo { id: "moviesandfilms", display_name: "Movies & Films", media_type: MediaType::Video },
 ];
 
 fn lookup_collection(id: &str) -> Option<&'static CollectionInfo> {
@@ -234,11 +242,11 @@ struct Config {
 }
 
 fn default_collections() -> String {
-    "feature_films,prelinger,oldtimeradio".to_string()
+    "feature_films,prelinger,oldtimeradio,GratefulDead,classic_tv,silent_films,film_noir,scifi,comedy_films,horror_movies,classic_cartoons".to_string()
 }
 
 fn default_items_per_collection() -> Value {
-    Value::Number(serde_json::Number::from(50))
+    Value::Number(serde_json::Number::from(40))
 }
 
 fn default_sort() -> String {
@@ -247,9 +255,9 @@ fn default_sort() -> String {
 
 fn parse_items_count(v: &Value) -> u32 {
     match v {
-        Value::Number(n) => n.as_u64().unwrap_or(50) as u32,
-        Value::String(s) => s.parse().unwrap_or(50),
-        _ => 50,
+        Value::Number(n) => n.as_u64().unwrap_or(40) as u32,
+        Value::String(s) => s.parse().unwrap_or(40),
+        _ => 40,
     }
 }
 
@@ -258,103 +266,6 @@ fn parse_collection_list(s: &str) -> Vec<String> {
         .map(|c| c.trim().to_string())
         .filter(|c| !c.is_empty())
         .collect()
-}
-
-// ============================================================
-// File selection logic (public for testing)
-// ============================================================
-
-/// Represents a file entry from the Internet Archive metadata API.
-#[derive(Deserialize, Clone, Debug)]
-pub struct ArchiveFile {
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub format: String,
-    #[serde(default)]
-    pub source: String,
-}
-
-/// Pick the best playable file for a video item.
-/// Priority: h.264 MP4 > MPEG4 > Ogg Video > any .mp4 original > None
-pub fn pick_best_video_file(files: &[ArchiveFile]) -> Option<&ArchiveFile> {
-    // Priority 1: h.264 derivative
-    if let Some(f) = files.iter().find(|f| {
-        f.format.to_lowercase().contains("h.264")
-            && f.name.to_lowercase().ends_with(".mp4")
-    }) {
-        return Some(f);
-    }
-
-    // Priority 2: MPEG4 derivative
-    if let Some(f) = files.iter().find(|f| {
-        f.format.to_lowercase().contains("mpeg4")
-            && f.name.to_lowercase().ends_with(".mp4")
-    }) {
-        return Some(f);
-    }
-
-    // Priority 3: Ogg Video
-    if let Some(f) = files.iter().find(|f| {
-        f.format.to_lowercase().contains("ogg video")
-            || f.name.to_lowercase().ends_with(".ogv")
-    }) {
-        return Some(f);
-    }
-
-    // Priority 4: any .mp4 file
-    if let Some(f) = files.iter().find(|f| {
-        f.name.to_lowercase().ends_with(".mp4")
-    }) {
-        return Some(f);
-    }
-
-    None
-}
-
-/// Pick the best playable file for an audio item.
-/// Priority: VBR MP3 > any .mp3 > Ogg Vorbis > FLAC > None
-pub fn pick_best_audio_file(files: &[ArchiveFile]) -> Option<&ArchiveFile> {
-    // Priority 1: VBR MP3 derivative
-    if let Some(f) = files.iter().find(|f| {
-        f.format.to_lowercase().contains("vbr mp3")
-            || (f.format.to_lowercase().contains("mp3") && f.source == "derivative")
-    }) {
-        return Some(f);
-    }
-
-    // Priority 2: any .mp3 file
-    if let Some(f) = files.iter().find(|f| {
-        f.name.to_lowercase().ends_with(".mp3")
-    }) {
-        return Some(f);
-    }
-
-    // Priority 3: Ogg Vorbis
-    if let Some(f) = files.iter().find(|f| {
-        f.format.to_lowercase().contains("ogg vorbis")
-            || f.name.to_lowercase().ends_with(".ogg")
-    }) {
-        return Some(f);
-    }
-
-    // Priority 4: FLAC
-    if let Some(f) = files.iter().find(|f| {
-        f.format.to_lowercase().contains("flac")
-            || f.name.to_lowercase().ends_with(".flac")
-    }) {
-        return Some(f);
-    }
-
-    None
-}
-
-/// Pick the best file based on media type.
-pub fn pick_best_file(files: &[ArchiveFile], media_type: MediaType) -> Option<&ArchiveFile> {
-    match media_type {
-        MediaType::Video => pick_best_video_file(files),
-        MediaType::Audio => pick_best_audio_file(files),
-    }
 }
 
 // ============================================================
@@ -382,6 +293,8 @@ pub struct SearchDoc {
     pub description: Option<String>,
     #[serde(default)]
     pub year: Option<Value>,
+    #[serde(default)]
+    pub creator: Option<Value>,
 }
 
 /// Parse search API JSON into docs.
@@ -391,38 +304,11 @@ pub fn parse_search_response(data: &[u8]) -> Option<Vec<SearchDoc>> {
 }
 
 // ============================================================
-// Metadata response parsing (public for testing)
+// Year / creator extraction helpers (public for testing)
 // ============================================================
 
-#[derive(Deserialize, Debug)]
-pub struct MetadataResponse {
-    #[serde(default)]
-    pub metadata: MetadataInfo,
-    #[serde(default)]
-    pub files: Vec<ArchiveFile>,
-    #[serde(default)]
-    pub is_dark: Option<bool>,
-}
-
-#[derive(Deserialize, Debug, Default)]
-pub struct MetadataInfo {
-    #[serde(default)]
-    pub title: Option<Value>,
-    #[serde(default)]
-    pub year: Option<Value>,
-    #[serde(default)]
-    pub collection: Option<Value>,
-    #[serde(default)]
-    pub mediatype: Option<String>,
-}
-
-/// Parse metadata API JSON.
-pub fn parse_metadata_response(data: &[u8]) -> Option<MetadataResponse> {
-    serde_json::from_slice(data).ok()
-}
-
 /// Extract a year string from a Value that may be a string or number.
-fn extract_year(v: &Option<Value>) -> Option<String> {
+pub fn extract_year(v: &Option<Value>) -> Option<String> {
     match v {
         Some(Value::String(s)) => {
             let trimmed = s.trim();
@@ -439,8 +325,8 @@ fn extract_year(v: &Option<Value>) -> Option<String> {
     }
 }
 
-/// Extract title from metadata (can be string or array).
-fn extract_title(v: &Option<Value>) -> Option<String> {
+/// Extract creator from a Value that may be a string or array.
+pub fn extract_creator(v: &Option<Value>) -> Option<String> {
     match v {
         Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
         Some(Value::Array(arr)) => arr.first().and_then(|v| v.as_str()).map(|s| s.to_string()),
@@ -449,27 +335,32 @@ fn extract_title(v: &Option<Value>) -> Option<String> {
 }
 
 // ============================================================
-// URL construction helpers
+// Heuristic URL construction
 // ============================================================
 
-fn search_url(collection: &str, sort: &str, rows: u32) -> String {
-    let encoded_sort = sort.replace(' ', "+");
-    format!(
-        "https://archive.org/advancedsearch.php?q=collection:{}&fl=identifier,title,description,year&sort={}&rows={}&output=json",
-        collection, encoded_sort, rows
-    )
+/// Build a heuristic download URL for a video item.
+/// The Internet Archive commonly derives an .mp4 file named `{identifier}.mp4`.
+pub fn heuristic_video_url(identifier: &str) -> String {
+    format!("https://archive.org/download/{}/{}.mp4", identifier, identifier)
 }
 
-fn metadata_url(identifier: &str) -> String {
-    format!("https://archive.org/metadata/{}", identifier)
-}
-
-fn download_url(identifier: &str, filename: &str) -> String {
-    format!("https://archive.org/download/{}/{}", identifier, filename)
+/// Build a heuristic download URL for an audio item.
+/// Many audio items have a VBR MP3 derivative named `{identifier}.mp3` or
+/// we can use the built-in playlist endpoint.
+pub fn heuristic_audio_url(identifier: &str) -> String {
+    format!("https://archive.org/download/{}/{}_vbr.mp3", identifier, identifier)
 }
 
 fn thumbnail_url(identifier: &str) -> String {
     format!("https://archive.org/services/img/{}", identifier)
+}
+
+fn search_url(collection: &str, sort: &str, rows: u32) -> String {
+    let encoded_sort = sort.replace(' ', "+");
+    format!(
+        "https://archive.org/advancedsearch.php?q=collection:{}&fl[]=identifier&fl[]=title&fl[]=description&fl[]=year&fl[]=creator&sort={}&rows={}&output=json",
+        collection, encoded_sort, rows
+    )
 }
 
 fn search_query_url(query: &str, collections: &[String], sort: &str, rows: u32) -> String {
@@ -482,91 +373,53 @@ fn search_query_url(query: &str, collections: &[String], sort: &str, rows: u32) 
     let encoded_query = query.replace(' ', "+");
     let encoded_sort = sort.replace(' ', "+");
     format!(
-        "https://archive.org/advancedsearch.php?q={}{}&fl=identifier,title,description,year&sort={}&rows={}&output=json",
+        "https://archive.org/advancedsearch.php?q={}{}&fl[]=identifier&fl[]=title&fl[]=description&fl[]=year&fl[]=creator&sort={}&rows={}&output=json",
         encoded_query, collection_filter, encoded_sort, rows
     )
 }
 
 // ============================================================
-// Fetch item metadata with KV caching
+// Build streams directly from search results (no per-item fetch)
 // ============================================================
 
-/// Cache key for an item's best playable URL.
-fn cache_key(identifier: &str) -> String {
-    format!("ia:{}", identifier)
-}
-
-/// Cached metadata result: url and optional year.
-#[derive(Serialize, Deserialize)]
-struct CachedItem {
-    url: String,
-    year: Option<String>,
-    title: Option<String>,
-}
-
-/// Fetch metadata for a single item, using KV cache.
-/// Returns (download_url, year, title) or None if no playable file found.
-fn fetch_item_metadata(identifier: &str, media_type: MediaType) -> Option<CachedItem> {
-    // Check cache
-    let key = cache_key(identifier);
-    if let Some(cached_json) = kv_get(&key) {
-        if let Ok(cached) = serde_json::from_str::<CachedItem>(&cached_json) {
-            if !cached.url.is_empty() {
-                return Some(cached);
-            }
-        }
-    }
-
-    // Fetch from API
-    let url = metadata_url(identifier);
-    let body = match http_get(&url) {
-        Some(b) => b,
-        None => {
-            log_error(&format!("failed to fetch metadata for {}", identifier));
-            return None;
-        }
+/// Convert a search doc to a stream using heuristic URL patterns.
+/// No per-item metadata fetch required.
+pub(crate) fn doc_to_stream(doc: &SearchDoc, group_name: &str, media_type: MediaType) -> Stream {
+    let name = if !doc.title.is_empty() {
+        doc.title.clone()
+    } else {
+        doc.identifier.clone()
     };
 
-    let meta = match parse_metadata_response(&body) {
-        Some(m) => m,
-        None => {
-            log_error(&format!("failed to parse metadata for {}", identifier));
-            return None;
-        }
+    let year = extract_year(&doc.year);
+
+    let url = match media_type {
+        MediaType::Video => heuristic_video_url(&doc.identifier),
+        MediaType::Audio => heuristic_audio_url(&doc.identifier),
     };
 
-    // Skip dark (restricted) items
-    if meta.is_dark == Some(true) {
-        return None;
-    }
-
-    // Pick best file
-    let best = match pick_best_file(&meta.files, media_type) {
-        Some(f) => f,
-        None => return None,
+    let vod_type = if media_type == MediaType::Video {
+        Some("movie".to_string())
+    } else {
+        None
     };
 
-    let dl_url = download_url(identifier, &best.name);
-    let year = extract_year(&meta.metadata.year);
-    let title = extract_title(&meta.metadata.title);
+    let tags = match media_type {
+        MediaType::Video => Some(vec!["video".to_string()]),
+        MediaType::Audio => Some(vec!["audio".to_string()]),
+    };
 
-    let item = CachedItem {
-        url: dl_url,
+    Stream {
+        id: doc.identifier.clone(),
+        name,
+        url,
+        group: group_name.to_string(),
+        logo: Some(thumbnail_url(&doc.identifier)),
+        vod_type,
         year,
-        title,
-    };
-
-    // Store in cache
-    if let Ok(json) = serde_json::to_string(&item) {
-        kv_set(&key, &json);
+        tags,
     }
-
-    Some(item)
 }
-
-// ============================================================
-// Refresh: fetch streams for configured collections
-// ============================================================
 
 fn fetch_collection_streams(collection_id: &str, sort: &str, rows: u32) -> Vec<Stream> {
     let display_name = collection_display_name(collection_id);
@@ -593,50 +446,11 @@ fn fetch_collection_streams(collection_id: &str, sort: &str, rows: u32) -> Vec<S
 
     log_info(&format!("found {} items in {}", docs.len(), collection_id));
 
-    let mut streams = Vec::new();
-
-    for doc in &docs {
-        if doc.identifier.is_empty() {
-            continue;
-        }
-
-        let cached = match fetch_item_metadata(&doc.identifier, media_type) {
-            Some(c) => c,
-            None => continue,
-        };
-
-        // Use title from search results first, fallback to metadata title
-        let name = if !doc.title.is_empty() {
-            doc.title.clone()
-        } else {
-            cached.title.unwrap_or_else(|| doc.identifier.clone())
-        };
-
-        // Use year from search results first, fallback to metadata year
-        let year = extract_year(&doc.year).or(cached.year);
-
-        let vod_type = if media_type == MediaType::Video {
-            Some("movie".to_string())
-        } else {
-            None
-        };
-
-        let tags = match media_type {
-            MediaType::Video => Some(vec!["video".to_string()]),
-            MediaType::Audio => Some(vec!["audio".to_string()]),
-        };
-
-        streams.push(Stream {
-            id: doc.identifier.clone(),
-            name,
-            url: cached.url,
-            group: display_name.clone(),
-            logo: Some(thumbnail_url(&doc.identifier)),
-            vod_type,
-            year,
-            tags,
-        });
-    }
+    let streams: Vec<Stream> = docs
+        .iter()
+        .filter(|doc| !doc.identifier.is_empty())
+        .map(|doc| doc_to_stream(doc, &display_name, media_type))
+        .collect();
 
     log_info(&format!("built {} streams for {}", streams.len(), collection_id));
     streams
@@ -653,14 +467,14 @@ pub extern "C" fn describe() -> u64 {
         label: "Internet Archive",
         short_label: "ARCHIVE",
         color: "#428bca",
-        version: "1.0.0",
+        version: "2.0.0",
         description: "Public domain movies, classic TV, old-time radio, and live concert recordings from the Internet Archive",
         config_fields: vec![
             serde_json::json!({
                 "key": "collections",
                 "label": "Collections",
                 "type": "select",
-                "default": "feature_films,prelinger,oldtimeradio",
+                "default": "feature_films,prelinger,oldtimeradio,GratefulDead,classic_tv,silent_films,film_noir,scifi,comedy_films,horror_movies,classic_cartoons",
                 "options": [
                     {"value": "feature_films", "label": "Feature Films"},
                     {"value": "prelinger", "label": "Prelinger Archives"},
@@ -669,7 +483,13 @@ pub extern "C" fn describe() -> u64 {
                     {"value": "classic_tv", "label": "Classic TV"},
                     {"value": "silent_films", "label": "Silent Films"},
                     {"value": "film_noir", "label": "Film Noir"},
-                    {"value": "scifi", "label": "Sci-Fi Films"}
+                    {"value": "scifi", "label": "Sci-Fi Films"},
+                    {"value": "comedy_films", "label": "Comedy Films"},
+                    {"value": "horror_movies", "label": "Horror Movies"},
+                    {"value": "anime", "label": "Anime"},
+                    {"value": "classic_cartoons", "label": "Classic Cartoons"},
+                    {"value": "noir", "label": "Noir Classics"},
+                    {"value": "moviesandfilms", "label": "Movies & Films"}
                 ],
                 "multi": true,
                 "description": "Select which Internet Archive collections to browse"
@@ -678,7 +498,7 @@ pub extern "C" fn describe() -> u64 {
                 "key": "items_per_collection",
                 "label": "Items per collection",
                 "type": "number",
-                "default": 50,
+                "default": 40,
                 "description": "Number of items to fetch per collection (max 200)"
             }),
             serde_json::json!({
@@ -727,22 +547,23 @@ pub extern "C" fn refresh(config_ptr: u32, config_len: u32) -> u64 {
     let rows = parse_items_count(&config.items_per_collection).min(200);
     let sort = &config.sort;
 
-    if collections.is_empty() {
-        log_info("no collections configured, using defaults");
-        let defaults = parse_collection_list(&default_collections());
-        let mut streams = Vec::new();
-        for coll in &defaults {
-            streams.extend(fetch_collection_streams(coll, sort, rows));
-        }
-        return return_json(&RefreshResponse { streams });
-    }
+    let active_collections = if collections.is_empty() {
+        parse_collection_list(&default_collections())
+    } else {
+        collections
+    };
 
     let mut streams = Vec::new();
-    for coll in &collections {
+    for coll in &active_collections {
         streams.extend(fetch_collection_streams(coll, sort, rows));
     }
 
-    log_info(&format!("refresh complete: {} total streams from {} collections", streams.len(), collections.len()));
+    log_info(&format!(
+        "refresh complete: {} total streams from {} collections ({} HTTP requests)",
+        streams.len(),
+        active_collections.len(),
+        active_collections.len()
+    ));
     return_json(&RefreshResponse { streams })
 }
 
@@ -780,7 +601,6 @@ pub extern "C" fn interact(action_ptr: u32, action_len: u32) -> u64 {
         return return_json(&serde_json::json!({ "streams": [] }));
     }
 
-    // Extract configured collections from config, or use defaults
     let collections = if let Some(cfg) = &req.config {
         cfg.get("collections")
             .and_then(|v| v.as_str())
@@ -820,42 +640,15 @@ pub extern "C" fn interact(action_ptr: u32, action_len: u32) -> u64 {
 
     log_info(&format!("search returned {} results", docs.len()));
 
-    let mut streams = Vec::new();
-    for doc in &docs {
-        if doc.identifier.is_empty() {
-            continue;
-        }
-
-        // Determine media type from the collection context; default to video
-        // We try video first, then audio if no video file found.
-        let media_type = MediaType::Video;
-        let cached = fetch_item_metadata(&doc.identifier, media_type)
-            .or_else(|| fetch_item_metadata(&doc.identifier, MediaType::Audio));
-
-        let cached = match cached {
-            Some(c) => c,
-            None => continue,
-        };
-
-        let name = if !doc.title.is_empty() {
-            doc.title.clone()
-        } else {
-            cached.title.unwrap_or_else(|| doc.identifier.clone())
-        };
-
-        let year = extract_year(&doc.year).or(cached.year);
-
-        streams.push(Stream {
-            id: doc.identifier.clone(),
-            name,
-            url: cached.url,
-            group: "Search Results".to_string(),
-            logo: Some(thumbnail_url(&doc.identifier)),
-            vod_type: Some("movie".to_string()),
-            year,
-            tags: None,
-        });
-    }
+    // Build streams directly from search results -- no per-item fetches
+    let streams: Vec<Stream> = docs
+        .iter()
+        .filter(|doc| !doc.identifier.is_empty())
+        .map(|doc| {
+            // Default to video for search results
+            doc_to_stream(doc, "Search Results", MediaType::Video)
+        })
+        .collect();
 
     return_json(&serde_json::json!({ "streams": streams }))
 }
