@@ -369,9 +369,10 @@ pub fn parse_rss_items(xml: &str) -> Vec<Stream> {
         };
 
         let episode_name = if !summary.is_empty() {
-            // Truncate long summaries to keep things reasonable
+            // Truncate long summaries (UTF-8 safe)
             if summary.len() > 300 {
-                Some(format!("{}...", &summary[..297]))
+                let truncated: String = summary.chars().take(297).collect();
+                Some(format!("{}...", truncated))
             } else {
                 Some(summary)
             }

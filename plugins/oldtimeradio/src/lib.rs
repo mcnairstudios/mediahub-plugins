@@ -611,7 +611,8 @@ pub extern "C" fn interact(action_ptr: u32, action_len: u32) -> u64 {
             } else if !doc.description.is_empty() {
                 let desc = &doc.description;
                 if desc.len() > 100 {
-                    format!("{}...", &desc[..100])
+                    let t: String = desc.chars().take(100).collect();
+                    format!("{}...", t)
                 } else {
                     desc.clone()
                 }

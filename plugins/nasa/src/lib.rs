@@ -247,7 +247,8 @@ pub fn parse_nasa_item(item: &Value, group: &str) -> Option<Stream> {
         .and_then(|v| v.as_str())
         .map(|s| {
             if s.len() > 200 {
-                format!("{}...", &s[..197])
+                let t: String = s.chars().take(197).collect();
+                format!("{}...", t)
             } else {
                 s.to_string()
             }
