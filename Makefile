@@ -1,13 +1,15 @@
 .PHONY: all clean test demo space radiogarden trailers \
 	iptvorg somafm radiobrowser librivox aerials nasa peertube trending \
 	archive oldtimeradio publicdomain ccmixter outdoorcams naturecams \
-	podcasts plutotv skylinecams slowtv operavision trafficcams ted openmhz \
+	podcasts plutotv skylinecams slowtv operavision trafficcams ted \
 	sciencetube cartoons worldnews
 
 RUST_PLUGINS = space radiogarden iptvorg somafm radiobrowser librivox aerials nasa \
 	peertube trending archive oldtimeradio publicdomain ccmixter outdoorcams \
-	naturecams podcasts plutotv skylinecams slowtv operavision trafficcams ted openmhz \
+	naturecams podcasts plutotv skylinecams slowtv operavision trafficcams ted \
 	sciencetube cartoons worldnews
+
+# openmhz disabled — API behind Cloudflare Managed Challenge, unsolvable from server-side HTTP
 
 GO_PLUGINS = demo trailers
 

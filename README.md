@@ -58,12 +58,6 @@ WASM source plugins for [MediaHub](https://github.com/mcnairstudios/mediahub). D
 | [nasa](plugins/nasa/) | NASA Video Library — launches, ISS, Mars | 100+ |
 | [space](plugins/space/) | Space launches from all agencies | ~700 |
 
-### Scanner & Emergency
-
-| Plugin | Description | Streams |
-|--------|-------------|---------|
-| [openmhz](plugins/openmhz/) | Police, fire, EMS scanner radio (225+ US systems) | 200-400 |
-
 ### Ambient & Niche
 
 | Plugin | Description | Streams |
