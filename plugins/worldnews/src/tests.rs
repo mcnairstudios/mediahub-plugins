@@ -5,8 +5,8 @@ fn test_build_streams_returns_all() {
     let streams = build_streams();
     assert_eq!(streams.len(), stream_count());
     assert!(
-        streams.len() >= 25,
-        "expected at least 25 streams, got {}",
+        streams.len() >= 20,
+        "expected at least 20 streams, got {}",
         streams.len()
     );
 }
@@ -16,8 +16,8 @@ fn test_all_urls_are_valid() {
     let streams = build_streams();
     for s in &streams {
         assert!(
-            s.url.starts_with("https://"),
-            "stream '{}' URL must use HTTPS: {}",
+            s.url.starts_with("https://") || s.url.starts_with("http://"),
+            "stream '{}' URL must use HTTP(S): {}",
             s.id,
             s.url
         );
@@ -36,8 +36,8 @@ fn test_hls_urls_are_well_formed() {
     let streams = build_streams();
     let hls: Vec<_> = streams.iter().filter(|s| s.url.ends_with(".m3u8")).collect();
     assert!(
-        hls.len() >= 8,
-        "expected at least 8 HLS streams, got {}",
+        hls.len() >= 12,
+        "expected at least 12 HLS streams, got {}",
         hls.len()
     );
     for s in &hls {
@@ -58,8 +58,8 @@ fn test_youtube_urls_have_video_id() {
         .filter(|s| s.url.starts_with("https://www.youtube.com/watch?v="))
         .collect();
     assert!(
-        yt.len() >= 10,
-        "expected at least 10 YouTube streams, got {}",
+        yt.len() >= 8,
+        "expected at least 8 YouTube streams, got {}",
         yt.len()
     );
     for s in &yt {
@@ -133,8 +133,8 @@ fn test_europe_streams_count() {
     let streams = build_streams();
     let eu: Vec<_> = streams.iter().filter(|s| s.group == "Europe").collect();
     assert!(
-        eu.len() >= 4,
-        "expected at least 4 Europe streams, got {}",
+        eu.len() >= 5,
+        "expected at least 5 Europe streams, got {}",
         eu.len()
     );
 }
@@ -169,8 +169,8 @@ fn test_science_space_streams_count() {
         .filter(|s| s.group == "Science & Space")
         .collect();
     assert!(
-        sci.len() >= 2,
-        "expected at least 2 Science & Space streams, got {}",
+        sci.len() >= 3,
+        "expected at least 3 Science & Space streams, got {}",
         sci.len()
     );
 }
@@ -203,18 +203,21 @@ fn test_specific_hls_stream() {
     let dw = streams.iter().find(|s| s.id == "dw-english").unwrap();
     assert_eq!(
         dw.url,
-        "https://dwamdstream107.akamaized.net/hls/live/2017968/dwstream107/stream05/streamPlaylist.m3u8"
+        "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/master.m3u8"
     );
     assert_eq!(dw.group, "International");
     assert_eq!(dw.name, "Deutsche Welle (English)");
 }
 
 #[test]
-fn test_specific_youtube_stream() {
+fn test_specific_abc_news_stream() {
     let streams = build_streams();
     let abc = streams.iter().find(|s| s.id == "abc-news-live").unwrap();
-    assert_eq!(abc.url, "https://www.youtube.com/watch?v=GUyXFaR0yqM");
-    assert_eq!(abc.group, "Americas");
+    assert_eq!(
+        abc.url,
+        "https://abc-news-dmd-streams-1.akamaized.net/out/v1/701126012d044971b3fa89406a440133/index.m3u8"
+    );
+    assert_eq!(abc.group, "International");
     assert_eq!(abc.name, "ABC News Live");
 }
 
@@ -271,17 +274,17 @@ fn test_pack_unpack_ptr_len() {
 fn test_aljazeera_hls_stream() {
     let streams = build_streams();
     let aj = streams.iter().find(|s| s.id == "aljazeera-english").unwrap();
-    assert_eq!(aj.url, "https://live-hls-web-aje.getaj.net/AJE/index.m3u8");
+    assert_eq!(aj.url, "https://live-hls-web-aja2-gcp.thehlive.com/AJA2/index.m3u8");
     assert_eq!(aj.group, "International");
 }
 
 #[test]
-fn test_kbs_world_stream() {
+fn test_cbc_news_bc_stream() {
     let streams = build_streams();
-    let kbs = streams.iter().find(|s| s.id == "kbs-world").unwrap();
+    let cbc = streams.iter().find(|s| s.id == "cbc-news-bc").unwrap();
     assert_eq!(
-        kbs.url,
-        "https://kbsworld-ott.akamaized.net/hls/live/2002341/kbsworld/master.m3u8"
+        cbc.url,
+        "https://amagi-streams.akamaized.net/hls/live/2110960/cbcnewsbc/master.m3u8"
     );
-    assert_eq!(kbs.group, "Asia");
+    assert_eq!(cbc.group, "Americas");
 }

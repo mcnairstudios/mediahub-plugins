@@ -300,16 +300,16 @@ fn test_parse_search_results_missing_items() {
 
 #[test]
 fn test_build_trending_url_general() {
-    let url = build_trending_url("https://pipedapi.kavin.rocks", "US", "");
-    assert_eq!(url, "https://pipedapi.kavin.rocks/trending?region=US");
+    let url = build_trending_url("https://api.piped.private.coffee", "US", "");
+    assert_eq!(url, "https://api.piped.private.coffee/trending?region=US");
 }
 
 #[test]
 fn test_build_trending_url_music() {
-    let url = build_trending_url("https://pipedapi.kavin.rocks", "GB", "music");
+    let url = build_trending_url("https://api.piped.private.coffee", "GB", "music");
     assert_eq!(
         url,
-        "https://pipedapi.kavin.rocks/trending?region=GB&type=music"
+        "https://api.piped.private.coffee/trending?region=GB&type=music"
     );
 }
 

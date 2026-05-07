@@ -206,23 +206,23 @@ struct NewsEntry {
 const STREAMS: &[NewsEntry] = &[
     // ── International ──────────────────────────────────────
     NewsEntry {
-        id: "dw-english",
-        name: "Deutsche Welle (English)",
-        url: StreamUrl::Hls("https://dwamdstream107.akamaized.net/hls/live/2017968/dwstream107/stream05/streamPlaylist.m3u8"),
+        id: "abc-news-live",
+        name: "ABC News Live",
+        url: StreamUrl::Hls("https://abc-news-dmd-streams-1.akamaized.net/out/v1/701126012d044971b3fa89406a440133/index.m3u8"),
         group: "International",
-        tags: &["english", "german-broadcaster", "24/7"],
+        tags: &["english", "usa", "24/7"],
     },
     NewsEntry {
         id: "aljazeera-english",
         name: "Al Jazeera English",
-        url: StreamUrl::Hls("https://live-hls-web-aje.getaj.net/AJE/index.m3u8"),
+        url: StreamUrl::Hls("https://live-hls-web-aja2-gcp.thehlive.com/AJA2/index.m3u8"),
         group: "International",
         tags: &["english", "middle-east", "24/7"],
     },
     NewsEntry {
         id: "france24-english",
         name: "France 24 (English)",
-        url: StreamUrl::Hls("https://uvotv-aniview.global.ssl.fastly.net/hls/live/2120684/france24english/playlist.m3u8"),
+        url: StreamUrl::Hls("https://amg00106-amg00106c1-rakuten-uk-4654.playouts.now.amagi.tv/playlist/amg00106-france24fast-france24fastenglish-rakuten-uk/playlist.m3u8"),
         group: "International",
         tags: &["english", "french-broadcaster", "24/7"],
     },
@@ -234,41 +234,41 @@ const STREAMS: &[NewsEntry] = &[
         tags: &["english", "china", "24/7"],
     },
     NewsEntry {
-        id: "trt-world",
-        name: "TRT World",
-        url: StreamUrl::Hls("https://tv-trtworld.live.trt.com.tr/master.m3u8"),
+        id: "dw-english",
+        name: "Deutsche Welle (English)",
+        url: StreamUrl::Hls("https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/master.m3u8"),
         group: "International",
-        tags: &["english", "turkey", "24/7"],
+        tags: &["english", "german-broadcaster", "24/7"],
     },
     NewsEntry {
         id: "nhk-world",
         name: "NHK World Japan",
-        url: StreamUrl::Hls("https://cdn.nhkworld.jp/www11/nhkworld-tv/pre/hlscomp.m3u8"),
+        url: StreamUrl::Hls("https://newssimul-stream.nhk.jp/hls/live/2010561/nhknewssimul/master.m3u8"),
         group: "International",
         tags: &["english", "japan", "24/7"],
     },
 
     // ── Europe ─────────────────────────────────────────────
     NewsEntry {
-        id: "dw-deutsch",
-        name: "Deutsche Welle (Deutsch)",
-        url: StreamUrl::Hls("https://dwamdstream111.akamaized.net/hls/live/2017972/dwstream111/stream05/streamPlaylist.m3u8"),
-        group: "Europe",
-        tags: &["german", "24/7"],
-    },
-    NewsEntry {
-        id: "ard-daserste",
-        name: "ARD Das Erste",
-        url: StreamUrl::Hls("https://daserste-live.ard-mcdn.de/daserste/live/hls/de/master.m3u8"),
-        group: "Europe",
-        tags: &["german", "public-broadcaster", "24/7"],
-    },
-    NewsEntry {
         id: "euronews-english",
         name: "Euronews (English)",
-        url: StreamUrl::YouTube("pBMpSLbNNHc"),
+        url: StreamUrl::Hls("https://dash4.antik.sk/live/test_euronews/playlist.m3u8"),
         group: "Europe",
         tags: &["english", "eu", "24/7"],
+    },
+    NewsEntry {
+        id: "trt-world",
+        name: "TRT World",
+        url: StreamUrl::Hls("https://dash2.antik.sk/live/test_trt_world_atktv/playlist.m3u8"),
+        group: "Europe",
+        tags: &["english", "turkey", "24/7"],
+    },
+    NewsEntry {
+        id: "sky-news-arabia",
+        name: "Sky News Arabia",
+        url: StreamUrl::Hls("https://live-stream.skynewsarabia.com/c-horizontal-channel/horizontal-stream/index.m3u8"),
+        group: "Europe",
+        tags: &["arabic", "middle-east", "24/7"],
     },
     NewsEntry {
         id: "sky-news",
@@ -294,16 +294,16 @@ const STREAMS: &[NewsEntry] = &[
 
     // ── Asia ───────────────────────────────────────────────
     NewsEntry {
-        id: "kbs-world",
-        name: "KBS World 24",
-        url: StreamUrl::Hls("https://kbsworld-ott.akamaized.net/hls/live/2002341/kbsworld/master.m3u8"),
+        id: "wion-india",
+        name: "WION News",
+        url: StreamUrl::Hls("https://d7x8z4yuq42qn.cloudfront.net/index_7.m3u8"),
         group: "Asia",
-        tags: &["korean", "english", "24/7"],
+        tags: &["english", "india", "24/7"],
     },
     NewsEntry {
         id: "arirang-korea",
         name: "Arirang TV (Korea)",
-        url: StreamUrl::YouTube("rBAkIJBLmgs"),
+        url: StreamUrl::Hls("http://amdlive-ch01.ctnd.com.edgesuite.net/arirang_3ch/smil:arirang_3ch.smil/playlist.m3u8"),
         group: "Asia",
         tags: &["english", "korea", "24/7"],
     },
@@ -315,13 +315,6 @@ const STREAMS: &[NewsEntry] = &[
         tags: &["english", "singapore", "24/7"],
     },
     NewsEntry {
-        id: "wion-india",
-        name: "WION News",
-        url: StreamUrl::YouTube("MNwwMoFJwPI"),
-        group: "Asia",
-        tags: &["english", "india", "24/7"],
-    },
-    NewsEntry {
         id: "nhk-japan-yt",
         name: "NHK News (Japanese)",
         url: StreamUrl::YouTube("coYw-eVU0Ks"),
@@ -331,11 +324,11 @@ const STREAMS: &[NewsEntry] = &[
 
     // ── Americas ───────────────────────────────────────────
     NewsEntry {
-        id: "abc-news-live",
-        name: "ABC News Live",
-        url: StreamUrl::YouTube("GUyXFaR0yqM"),
+        id: "cbc-news-bc",
+        name: "CBC News BC",
+        url: StreamUrl::Hls("https://amagi-streams.akamaized.net/hls/live/2110960/cbcnewsbc/master.m3u8"),
         group: "Americas",
-        tags: &["english", "usa", "24/7"],
+        tags: &["english", "canada", "24/7"],
     },
     NewsEntry {
         id: "cbs-news",
@@ -380,6 +373,13 @@ const STREAMS: &[NewsEntry] = &[
         url: StreamUrl::Hls("https://ntv1.akamaized.net/hls/live/2014075/NASA-NTV1-HLS/master.m3u8"),
         group: "Science & Space",
         tags: &["english", "space", "24/7"],
+    },
+    NewsEntry {
+        id: "cgtn-amagi",
+        name: "CGTN (Amagi)",
+        url: StreamUrl::Hls("https://amg00405-rakutentv-cgtn-rakuten-i9tar.amagi.tv/master.m3u8"),
+        group: "Science & Space",
+        tags: &["english", "china", "24/7"],
     },
     NewsEntry {
         id: "nasa-iss",

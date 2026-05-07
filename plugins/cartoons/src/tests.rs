@@ -257,7 +257,9 @@ fn test_decade_from_year_short() {
 #[test]
 fn test_search_url() {
     let url = search_url();
-    assert!(url.contains("collection:pdcartooncollection"));
+    assert!(url.contains("subject:cartoon"));
+    assert!(url.contains("mediatype:movies"));
+    assert!(url.contains("year:[1920+TO+1960]"));
     assert!(url.contains("rows=200"));
     assert!(url.contains("sort=downloads+desc"));
     assert!(url.contains("output=json"));
@@ -268,6 +270,22 @@ fn test_video_url() {
     assert_eq!(
         video_url("popeye-the-sailor"),
         "https://archive.org/download/popeye-the-sailor/popeye-the-sailor.mp4"
+    );
+}
+
+#[test]
+fn test_video_url_lowres() {
+    assert_eq!(
+        video_url_lowres("popeye-the-sailor"),
+        "https://archive.org/download/popeye-the-sailor/popeye-the-sailor_512kb.mp4"
+    );
+}
+
+#[test]
+fn test_video_url_fallback() {
+    assert_eq!(
+        video_url_fallback("popeye-the-sailor"),
+        "https://archive.org/details/popeye-the-sailor"
     );
 }
 
@@ -302,6 +320,8 @@ fn test_doc_to_stream_full() {
     assert_eq!(stream.vod_type, "movie");
     assert_eq!(stream.year, Some("1936".to_string()));
     assert_eq!(stream.tags, Some(vec!["cartoon".to_string()]));
+    assert_eq!(stream.alt_url, Some("https://archive.org/download/popeye-the-sailor/popeye-the-sailor_512kb.mp4".to_string()));
+    assert_eq!(stream.web_url, Some("https://archive.org/details/popeye-the-sailor".to_string()));
 }
 
 #[test]
@@ -319,6 +339,8 @@ fn test_doc_to_stream_minimal() {
     assert_eq!(stream.name, "unknown-cartoon"); // fallback to identifier
     assert_eq!(stream.group, "Classic Cartoons"); // fallback
     assert_eq!(stream.year, None);
+    assert_eq!(stream.alt_url, Some("https://archive.org/download/unknown-cartoon/unknown-cartoon_512kb.mp4".to_string()));
+    assert_eq!(stream.web_url, Some("https://archive.org/details/unknown-cartoon".to_string()));
 }
 
 #[test]

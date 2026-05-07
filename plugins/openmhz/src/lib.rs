@@ -82,7 +82,7 @@ fn log_error(msg: &str) {
 fn http_get(url: &str) -> Option<Vec<u8>> {
     let url_bytes = url.as_bytes();
     let method = b"GET";
-    let headers = b"{}";
+    let headers = br#"{"User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36","Origin":"https://openmhz.com","Accept":"application/json","Referer":"https://openmhz.com/"}"#;
 
     let result = unsafe {
         host_http_request(
@@ -218,7 +218,7 @@ struct SystemsResponse {
 #[derive(Deserialize, Debug, Clone)]
 #[allow(dead_code)]
 struct SrcEntry {
-    src: Option<i64>,
+    src: Option<Value>,
     #[serde(default)]
     tag: Option<String>,
 }
@@ -228,24 +228,32 @@ struct Call {
     #[serde(rename = "_id")]
     id: Option<String>,
     url: Option<String>,
-    #[serde(rename = "talkgroupDescription")]
-    talkgroup_description: Option<String>,
     #[serde(rename = "talkgroupNum")]
     talkgroup_num: Option<i64>,
     #[serde(rename = "srcList")]
     #[allow(dead_code)]
     src_list: Option<Vec<SrcEntry>>,
-    time: Option<f64>,
+    time: Option<String>,
     len: Option<f64>,
-    #[serde(rename = "talkgroupGroup")]
-    talkgroup_group: Option<String>,
-    #[serde(rename = "talkgroupTag")]
-    talkgroup_tag: Option<String>,
+    #[allow(dead_code)]
+    freq: Option<i64>,
+    emergency: Option<bool>,
 }
 
 #[derive(Deserialize, Debug)]
 struct CallsResponse {
     calls: Option<Vec<Call>>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct Talkgroup {
+    num: i64,
+    description: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct TalkgroupsResponse {
+    talkgroups: Option<Vec<Talkgroup>>,
 }
 
 // ============================================================
@@ -284,18 +292,24 @@ fn parse_calls(data: &[u8]) -> Vec<Call> {
 }
 
 /// Convert a single call into a Stream, using the system display name as group.
-fn call_to_stream(call: &Call, system_name: &str) -> Option<Stream> {
+/// `tg_map` maps talkgroup numbers to their descriptions.
+fn call_to_stream(
+    call: &Call,
+    system_name: &str,
+    tg_map: &std::collections::HashMap<i64, String>,
+) -> Option<Stream> {
     let url = call.url.as_deref().unwrap_or("");
     if url.is_empty() {
         return None;
     }
 
-    let tg_desc = call
-        .talkgroup_description
-        .as_deref()
+    let tg_num = call.talkgroup_num.unwrap_or(0);
+
+    let tg_desc = tg_map
+        .get(&tg_num)
+        .map(|s| s.as_str())
         .unwrap_or("Unknown Talkgroup");
 
-    let tg_num = call.talkgroup_num.unwrap_or(0);
     let duration = call.len.unwrap_or(0.0);
 
     // Build a human-readable name: "TG Description (Xs)"
@@ -308,22 +322,14 @@ fn call_to_stream(call: &Call, system_name: &str) -> Option<Stream> {
     // Use call _id or synthesize from talkgroup + time
     let id = match &call.id {
         Some(id) if !id.is_empty() => id.clone(),
-        _ => format!("{}-{}", tg_num, call.time.unwrap_or(0.0) as i64),
+        _ => format!("{}-{}", tg_num, call.time.as_deref().unwrap_or("0")),
     };
 
-    // Build tags from talkgroup group and tag fields
+    // Build tags from talkgroup number and emergency status
     let mut tags: Vec<String> = Vec::new();
-    if let Some(ref group) = call.talkgroup_group {
-        let g = group.trim().to_lowercase();
-        if !g.is_empty() {
-            tags.push(g);
-        }
-    }
-    if let Some(ref tag) = call.talkgroup_tag {
-        let t = tag.trim().to_lowercase();
-        if !t.is_empty() && !tags.contains(&t) {
-            tags.push(t);
-        }
+    tags.push(format!("tg{}", tg_num));
+    if call.emergency.unwrap_or(false) {
+        tags.push("emergency".to_string());
     }
 
     Some(Stream {
@@ -337,13 +343,31 @@ fn call_to_stream(call: &Call, system_name: &str) -> Option<Stream> {
     })
 }
 
+/// Parse talkgroups JSON into a map from talkgroup number to description.
+fn parse_talkgroups(data: &[u8]) -> std::collections::HashMap<i64, String> {
+    let resp: TalkgroupsResponse = match serde_json::from_slice(data) {
+        Ok(r) => r,
+        Err(_) => return std::collections::HashMap::new(),
+    };
+    resp.talkgroups
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|tg| tg.description.map(|desc| (tg.num, desc)))
+        .collect()
+}
+
 /// Convert a full calls response into streams for a given system.
-fn calls_to_streams(data: &[u8], system_name: &str, limit: usize) -> Vec<Stream> {
+fn calls_to_streams(
+    data: &[u8],
+    system_name: &str,
+    limit: usize,
+    tg_map: &std::collections::HashMap<i64, String>,
+) -> Vec<Stream> {
     let calls = parse_calls(data);
     calls
         .iter()
         .take(limit)
-        .filter_map(|c| call_to_stream(c, system_name))
+        .filter_map(|c| call_to_stream(c, system_name, tg_map))
         .collect()
 }
 
@@ -452,10 +476,17 @@ pub extern "C" fn refresh(config_ptr: u32, config_len: u32) -> u64 {
             .cloned()
             .unwrap_or_else(|| short_name.clone());
 
-        let url = format!(
-            "https://api.openmhz.com/{}/calls/newer?time=0&filter-type=all",
-            short_name
-        );
+        // Fetch talkgroups for this system to resolve descriptions
+        let tg_url = format!("https://api.openmhz.com/{}/talkgroups", short_name);
+        let tg_map = match http_get(&tg_url) {
+            Some(data) => parse_talkgroups(&data),
+            None => {
+                log_error(&format!("failed to fetch talkgroups for {}", short_name));
+                std::collections::HashMap::new()
+            }
+        };
+
+        let url = format!("https://api.openmhz.com/{}/calls", short_name);
 
         let data = match http_get(&url) {
             Some(d) => d,
@@ -465,7 +496,8 @@ pub extern "C" fn refresh(config_ptr: u32, config_len: u32) -> u64 {
             }
         };
 
-        let system_streams = calls_to_streams(&data, &display_name, MAX_CALLS_PER_SYSTEM);
+        let system_streams =
+            calls_to_streams(&data, &display_name, MAX_CALLS_PER_SYSTEM, &tg_map);
         log_info(&format!(
             "fetched {} calls for {} ({})",
             system_streams.len(),

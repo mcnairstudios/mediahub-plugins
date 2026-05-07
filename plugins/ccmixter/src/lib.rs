@@ -80,7 +80,7 @@ fn log_error(msg: &str) {
 }
 
 const CCMIXTER_HEADERS: &str =
-    r#"{"User-Agent":"Mozilla/5.0","Referer":"https://ccmixter.org/"}"#;
+    r#"{"User-Agent":"Mozilla/5.0","Referer":"http://ccmixter.org/"}"#;
 
 fn http_get(url: &str) -> Option<Vec<u8>> {
     let url_bytes = url.as_bytes();
@@ -197,6 +197,17 @@ struct SearchResult {
 // API parsing helpers (pure functions, testable without host)
 // ============================================================
 
+/// Force ccMixter URLs to use HTTP instead of HTTPS.
+/// The site's SSL certificate is broken, causing HTTPS connections to fail
+/// with HTTP 000 (connection failure). The HTTP endpoint works correctly.
+fn fix_ccmixter_url(url: &str) -> String {
+    if url.starts_with("https://ccmixter.org/") {
+        url.replacen("https://", "http://", 1)
+    } else {
+        url.to_string()
+    }
+}
+
 /// Find the best audio file URL from the upload's files array.
 /// Prefers MP3 (audio/mpeg), falls back to any audio file.
 fn find_audio_url(files: &[Value]) -> Option<String> {
@@ -210,7 +221,7 @@ fn find_audio_url(files: &[Value]) -> Option<String> {
         if mime == "audio/mpeg" {
             if let Some(url) = file.get("download_url").and_then(|u| u.as_str()) {
                 if !url.is_empty() {
-                    return Some(url.to_string());
+                    return Some(fix_ccmixter_url(url));
                 }
             }
         }
@@ -226,7 +237,7 @@ fn find_audio_url(files: &[Value]) -> Option<String> {
         if mime.starts_with("audio/") {
             if let Some(url) = file.get("download_url").and_then(|u| u.as_str()) {
                 if !url.is_empty() {
-                    return Some(url.to_string());
+                    return Some(fix_ccmixter_url(url));
                 }
             }
         }
@@ -239,10 +250,23 @@ fn find_audio_url(files: &[Value]) -> Option<String> {
 /// Returns a cleaned, title-cased group name.
 fn extract_group(upload: &Value) -> String {
     // Try upload_extra.ccud first (content type: remix, sample, a_cappella)
+    // The ccud field can be comma-separated (e.g. "freestylemix,contest_entry,remix,editorial_pick")
+    // so we check each value for known group types.
     if let Some(extra) = upload.get("upload_extra") {
         if let Some(ccud) = extra.get("ccud").and_then(|v| v.as_str()) {
             if !ccud.is_empty() {
-                return format_group_name(ccud);
+                // Known content types in priority order
+                let known_types = ["remix", "sample", "a_cappella", "editorial_pick"];
+                for part in ccud.split(',') {
+                    let trimmed = part.trim();
+                    if known_types.iter().any(|&k| k == trimmed) {
+                        return format_group_name(trimmed);
+                    }
+                }
+                // If no known type found, use the first non-empty part
+                if let Some(first) = ccud.split(',').map(|s| s.trim()).find(|s| !s.is_empty()) {
+                    return format_group_name(first);
+                }
             }
         }
     }
@@ -368,8 +392,9 @@ fn upload_to_stream(upload: &Value) -> Option<Stream> {
     let name = format!("{} - {}", upload_name, user_name);
 
     // Include required HTTP headers for audio playback (Referer needed for hotlink protection)
+    // Use HTTP (not HTTPS) because the site's SSL certificate is broken
     let http_headers = Some(serde_json::json!({
-        "Referer": "https://ccmixter.org/",
+        "Referer": "http://ccmixter.org/",
         "User-Agent": "Mozilla/5.0"
     }));
 

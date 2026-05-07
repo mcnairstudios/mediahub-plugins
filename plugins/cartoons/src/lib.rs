@@ -172,6 +172,12 @@ pub struct Stream {
     tags: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     episode_name: Option<String>,
+    /// Lower-bitrate direct download URL (fallback if primary 503s).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    alt_url: Option<String>,
+    /// Web player page URL (always works).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    web_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -321,15 +327,34 @@ pub fn decade_from_year(year: &Option<String>) -> Option<String> {
 // URL construction
 // ============================================================
 
+/// Build the primary search URL using a broad subject+mediatype+year query.
+/// This returns ~1000+ results vs ~81 from the old `pdcartooncollection`.
 pub fn search_url() -> String {
-    "https://archive.org/advancedsearch.php?q=collection:pdcartooncollection&fl[]=identifier&fl[]=title&fl[]=description&fl[]=year&fl[]=creator&rows=200&sort=downloads+desc&output=json".to_string()
+    "https://archive.org/advancedsearch.php?q=subject:cartoon+AND+mediatype:movies+AND+year:[1920+TO+1960]&fl[]=identifier&fl[]=title&fl[]=description&fl[]=year&fl[]=creator&rows=200&sort=downloads+desc&output=json".to_string()
 }
 
+/// Primary direct-download URL for the video.
+/// This heuristic (`{id}/{id}.mp4`) works for many items but not all
+/// (some return 503). Use `video_url_fallback` for a guaranteed-working page.
 pub fn video_url(identifier: &str) -> String {
     format!(
         "https://archive.org/download/{}/{}.mp4",
         identifier, identifier
     )
+}
+
+/// Lower-bitrate variant that sometimes exists when the primary does not.
+pub fn video_url_lowres(identifier: &str) -> String {
+    format!(
+        "https://archive.org/download/{}/{}_512kb.mp4",
+        identifier, identifier
+    )
+}
+
+/// Fallback URL pointing to the Internet Archive web player page.
+/// Always works regardless of which file derivatives exist.
+pub fn video_url_fallback(identifier: &str) -> String {
+    format!("https://archive.org/details/{}", identifier)
 }
 
 pub fn thumbnail_url(identifier: &str) -> String {
@@ -358,6 +383,8 @@ pub fn doc_to_stream(doc: &SearchDoc) -> Stream {
         year,
         tags: Some(vec!["cartoon".to_string()]),
         episode_name: None,
+        alt_url: Some(video_url_lowres(&doc.identifier)),
+        web_url: Some(video_url_fallback(&doc.identifier)),
     }
 }
 

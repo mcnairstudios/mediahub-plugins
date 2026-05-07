@@ -82,7 +82,7 @@ fn log_error(msg: &str) {
 fn http_get(url: &str) -> Option<Vec<u8>> {
     let url_bytes = url.as_bytes();
     let method = b"GET";
-    let headers = b"{}";
+    let headers = br#"{"User-Agent":"Mozilla/5.0"}"#;
 
     let result = unsafe {
         host_http_request(
@@ -206,14 +206,15 @@ const CHANNELS: &[Channel] = &[
 ];
 
 // ============================================================
-// YouTube RSS feed URL
+// Piped API URLs
 // ============================================================
 
-pub fn feed_url(channel_id: &str) -> String {
-    format!(
-        "https://www.youtube.com/feeds/videos.xml?channel_id={}",
-        channel_id
-    )
+const PIPED_BASE_PRIMARY: &str = "https://api.piped.private.coffee";
+const PIPED_BASE_BACKUP: &str = "https://pipedapi.in.projectsegfau.lt";
+
+/// Build the Piped API channel URL for a given channel ID.
+pub fn channel_api_url(base: &str, channel_id: &str) -> String {
+    format!("{}/channel/{}", base, channel_id)
 }
 
 pub fn video_url(video_id: &str) -> String {
@@ -225,146 +226,95 @@ pub fn thumbnail_url(video_id: &str) -> String {
 }
 
 // ============================================================
-// Atom XML parsing (string matching)
+// Piped JSON parsing
 // ============================================================
 
-/// Extract all `<entry>...</entry>` blocks from Atom XML.
-pub fn extract_entries(xml: &str) -> Vec<&str> {
-    let mut entries = Vec::new();
-    let mut search_from = 0;
-
-    loop {
-        let start = match xml[search_from..].find("<entry>") {
-            Some(pos) => search_from + pos,
-            None => break,
+/// Extract the video ID from a Piped `url` field like "/watch?v=VIDEO_ID".
+pub fn extract_video_id(url_field: &str) -> Option<String> {
+    let prefix = "/watch?v=";
+    if let Some(pos) = url_field.find(prefix) {
+        let id_start = pos + prefix.len();
+        let rest = &url_field[id_start..];
+        // Video ID goes until end of string or next '&'
+        let id = match rest.find('&') {
+            Some(end) => &rest[..end],
+            None => rest,
         };
-        let end = match xml[start..].find("</entry>") {
-            Some(pos) => start + pos + "</entry>".len(),
-            None => break,
-        };
-        entries.push(&xml[start..end]);
-        search_from = end;
-    }
-
-    entries
-}
-
-/// Extract the text content between `<tag>` and `</tag>`.
-pub fn extract_tag(xml: &str, tag: &str) -> Option<String> {
-    let open = format!("<{}", tag);
-    let close = format!("</{}>", tag.split_whitespace().next().unwrap_or(tag));
-
-    let start_tag = xml.find(&open)?;
-    // Find the end of the opening tag (handle attributes)
-    let content_start = xml[start_tag..].find('>')? + start_tag + 1;
-    let content_end = xml[content_start..].find(&close)? + content_start;
-
-    Some(xml[content_start..content_end].trim().to_string())
-}
-
-/// Extract an attribute value from a tag, e.g. `<media:thumbnail url="...">`.
-pub fn extract_attr(xml: &str, tag: &str, attr: &str) -> Option<String> {
-    let tag_start = xml.find(&format!("<{}", tag))?;
-    let tag_end = xml[tag_start..].find('>')? + tag_start;
-    let tag_content = &xml[tag_start..=tag_end];
-
-    let attr_pattern = format!("{}=\"", attr);
-    let attr_start = tag_content.find(&attr_pattern)? + attr_pattern.len();
-    let attr_end = tag_content[attr_start..].find('"')? + attr_start;
-
-    Some(tag_content[attr_start..attr_end].to_string())
-}
-
-/// Parse a single `<entry>` block into a Stream.
-pub fn entry_to_stream(entry: &str, channel_name: &str) -> Option<Stream> {
-    // Extract video ID from <yt:videoId>
-    let vid_id = extract_tag(entry, "yt:videoId")?;
-
-    // Extract title
-    let title = extract_tag(entry, "title").unwrap_or_else(|| vid_id.clone());
-
-    // Extract published date for year
-    let published = extract_tag(entry, "published");
-    let year = published.as_ref().and_then(|p| {
-        if p.len() >= 4 {
-            Some(p[..4].to_string())
-        } else {
+        if id.is_empty() {
             None
-        }
-    });
-
-    // Extract thumbnail URL -- prefer media:thumbnail, fallback to heuristic
-    let thumb = extract_attr(entry, "media:thumbnail", "url")
-        .unwrap_or_else(|| thumbnail_url(&vid_id));
-
-    // Build episode name from published date
-    let episode_name = published.as_ref().and_then(|p| {
-        if p.len() >= 10 {
-            Some(format_date(&p[..10]))
         } else {
-            None
+            Some(id.to_string())
         }
-    });
-
-    Some(Stream {
-        id: format!("yt-{}", vid_id),
-        name: unescape_xml(&title),
-        url: video_url(&vid_id),
-        group: channel_name.to_string(),
-        logo: Some(thumb),
-        vod_type: "movie".to_string(),
-        year,
-        tags: Some(vec!["youtube".to_string()]),
-        episode_name,
-    })
-}
-
-/// Parse all entries from a feed into streams.
-pub fn parse_feed(xml: &str, channel_name: &str) -> Vec<Stream> {
-    let entries = extract_entries(xml);
-    entries
-        .iter()
-        .filter_map(|entry| entry_to_stream(entry, channel_name))
-        .collect()
-}
-
-/// Format a date string like "2025-01-14" into "Jan 14, 2025".
-pub fn format_date(date: &str) -> String {
-    if date.len() < 10 {
-        return date.to_string();
+    } else {
+        None
     }
+}
 
-    let month_str = &date[5..7];
-    let day_str = &date[8..10];
-    let year_str = &date[0..4];
-
-    let month_name = match month_str {
-        "01" => "Jan",
-        "02" => "Feb",
-        "03" => "Mar",
-        "04" => "Apr",
-        "05" => "May",
-        "06" => "Jun",
-        "07" => "Jul",
-        "08" => "Aug",
-        "09" => "Sep",
-        "10" => "Oct",
-        "11" => "Nov",
-        "12" => "Dec",
-        _ => return date.to_string(),
+/// Parse the Piped API JSON response for a channel into a list of Streams.
+/// `channel_name` is the fallback name if the JSON `name` field is missing.
+pub fn parse_piped_response(json_str: &str, channel_name: &str) -> Vec<Stream> {
+    let parsed: Value = match serde_json::from_str(json_str) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
     };
 
-    format!("{} {}, {}", month_name, day_str, year_str)
-}
+    // Use the channel name from the API response if available, otherwise fallback.
+    let group = parsed["name"]
+        .as_str()
+        .unwrap_or(channel_name)
+        .to_string();
 
-/// Unescape basic XML entities.
-pub fn unescape_xml(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&#39;", "'")
+    let streams_array = match parsed["relatedStreams"].as_array() {
+        Some(arr) => arr,
+        None => return Vec::new(),
+    };
+
+    let mut streams = Vec::new();
+
+    for item in streams_array {
+        // Filter out Shorts
+        if item["isShort"].as_bool().unwrap_or(false) {
+            continue;
+        }
+
+        let url_field = match item["url"].as_str() {
+            Some(u) => u,
+            None => continue,
+        };
+
+        let vid_id = match extract_video_id(url_field) {
+            Some(id) => id,
+            None => continue,
+        };
+
+        let title = item["title"]
+            .as_str()
+            .unwrap_or(&vid_id)
+            .to_string();
+
+        let thumb = item["thumbnail"]
+            .as_str()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| thumbnail_url(&vid_id));
+
+        let episode_name = item["uploadedDate"]
+            .as_str()
+            .map(|s| s.to_string());
+
+        streams.push(Stream {
+            id: format!("yt-{}", vid_id),
+            name: title,
+            url: video_url(&vid_id),
+            group: group.clone(),
+            logo: Some(thumb),
+            vod_type: "movie".to_string(),
+            year: None,
+            tags: Some(vec!["youtube".to_string()]),
+            episode_name,
+        });
+    }
+
+    streams
 }
 
 // ============================================================
@@ -378,8 +328,8 @@ pub extern "C" fn describe() -> u64 {
         label: "Science & Tech",
         short_label: "SCI",
         color: "#1b5e20",
-        version: "1.0.0",
-        description: "Science and technology videos from top YouTube channels via RSS feeds",
+        version: "2.0.0",
+        description: "Science and technology videos from top YouTube channels via Piped API",
         config_fields: vec![],
         view: View {
             layout: "grouped_list",
@@ -399,19 +349,30 @@ pub extern "C" fn refresh(config_ptr: u32, config_len: u32) -> u64 {
     let mut streams: Vec<Stream> = Vec::new();
 
     for channel in CHANNELS {
-        let url = feed_url(channel.id);
-        log_info(&format!("fetching feed for {}: {}", channel.name, url));
+        let primary_url = channel_api_url(PIPED_BASE_PRIMARY, channel.id);
+        log_info(&format!("fetching channel {} from Piped: {}", channel.name, primary_url));
 
-        let body = match http_get(&url) {
+        let body = match http_get(&primary_url) {
             Some(b) => b,
             None => {
-                log_error(&format!("failed to fetch feed for {}", channel.name));
-                continue;
+                // Try backup instance
+                let backup_url = channel_api_url(PIPED_BASE_BACKUP, channel.id);
+                log_info(&format!(
+                    "primary failed for {}, trying backup: {}",
+                    channel.name, backup_url
+                ));
+                match http_get(&backup_url) {
+                    Some(b) => b,
+                    None => {
+                        log_error(&format!("failed to fetch channel {} from both instances", channel.name));
+                        continue;
+                    }
+                }
             }
         };
 
-        let xml = String::from_utf8_lossy(&body);
-        let channel_streams = parse_feed(&xml, channel.name);
+        let json_str = String::from_utf8_lossy(&body);
+        let channel_streams = parse_piped_response(&json_str, channel.name);
         log_info(&format!(
             "parsed {} videos from {}",
             channel_streams.len(),

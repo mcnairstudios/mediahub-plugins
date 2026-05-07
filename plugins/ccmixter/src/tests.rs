@@ -2,11 +2,40 @@ use super::*;
 use serde_json::json;
 
 // ============================================================
+// Tests for fix_ccmixter_url
+// ============================================================
+
+#[test]
+fn test_fix_ccmixter_url_https_to_http() {
+    assert_eq!(
+        fix_ccmixter_url("https://ccmixter.org/content/user/track.mp3"),
+        "http://ccmixter.org/content/user/track.mp3"
+    );
+}
+
+#[test]
+fn test_fix_ccmixter_url_already_http() {
+    assert_eq!(
+        fix_ccmixter_url("http://ccmixter.org/content/user/track.mp3"),
+        "http://ccmixter.org/content/user/track.mp3"
+    );
+}
+
+#[test]
+fn test_fix_ccmixter_url_other_domain_unchanged() {
+    assert_eq!(
+        fix_ccmixter_url("https://example.com/track.mp3"),
+        "https://example.com/track.mp3"
+    );
+}
+
+// ============================================================
 // Tests for find_audio_url
 // ============================================================
 
 #[test]
 fn test_find_audio_url_mp3_preferred() {
+    // Input uses https:// as returned by the real API; find_audio_url converts to http://
     let files = vec![
         json!({
             "file_name": "track.flac",
@@ -20,7 +49,7 @@ fn test_find_audio_url_mp3_preferred() {
         }),
     ];
     let url = find_audio_url(&files);
-    assert_eq!(url, Some("https://ccmixter.org/content/user/track.mp3".to_string()));
+    assert_eq!(url, Some("http://ccmixter.org/content/user/track.mp3".to_string()));
 }
 
 #[test]
@@ -29,16 +58,16 @@ fn test_find_audio_url_fallback_to_flac() {
         json!({
             "file_name": "track.flac",
             "file_format_info": { "mime_type": "audio/x-flac" },
-            "download_url": "https://ccmixter.org/content/user/track.flac"
+            "download_url": "http://ccmixter.org/content/user/track.flac"
         }),
         json!({
             "file_name": "stems.zip",
             "file_format_info": { "mime_type": "application/zip" },
-            "download_url": "https://ccmixter.org/content/user/stems.zip"
+            "download_url": "http://ccmixter.org/content/user/stems.zip"
         }),
     ];
     let url = find_audio_url(&files);
-    assert_eq!(url, Some("https://ccmixter.org/content/user/track.flac".to_string()));
+    assert_eq!(url, Some("http://ccmixter.org/content/user/track.flac".to_string()));
 }
 
 #[test]
@@ -47,7 +76,7 @@ fn test_find_audio_url_no_audio_files() {
         json!({
             "file_name": "stems.zip",
             "file_format_info": { "mime_type": "application/zip" },
-            "download_url": "https://ccmixter.org/content/user/stems.zip"
+            "download_url": "http://ccmixter.org/content/user/stems.zip"
         }),
     ];
     let url = find_audio_url(&files);
@@ -72,11 +101,11 @@ fn test_find_audio_url_skips_empty_download_url() {
         json!({
             "file_name": "track2.mp3",
             "file_format_info": { "mime_type": "audio/mpeg" },
-            "download_url": "https://ccmixter.org/content/user/track2.mp3"
+            "download_url": "http://ccmixter.org/content/user/track2.mp3"
         }),
     ];
     let url = find_audio_url(&files);
-    assert_eq!(url, Some("https://ccmixter.org/content/user/track2.mp3".to_string()));
+    assert_eq!(url, Some("http://ccmixter.org/content/user/track2.mp3".to_string()));
 }
 
 // ============================================================
@@ -106,6 +135,33 @@ fn test_extract_group_a_cappella() {
         "upload_extra": { "ccud": "a_cappella" }
     });
     assert_eq!(extract_group(&upload), "A Cappellas");
+}
+
+#[test]
+fn test_extract_group_comma_separated_ccud() {
+    // Real API data has comma-separated ccud values
+    let upload = json!({
+        "upload_extra": { "ccud": "freestylemix,contest_entry,remix,editorial_pick,winner" },
+        "upload_tags": "electronic,beat"
+    });
+    assert_eq!(extract_group(&upload), "Remixes");
+}
+
+#[test]
+fn test_extract_group_comma_separated_ccud_sample() {
+    let upload = json!({
+        "upload_extra": { "ccud": "contest_entry,sample,vocal" }
+    });
+    assert_eq!(extract_group(&upload), "Samples");
+}
+
+#[test]
+fn test_extract_group_comma_separated_ccud_no_known_type() {
+    let upload = json!({
+        "upload_extra": { "ccud": "freestylemix,contest_entry,winner" }
+    });
+    // Falls back to first value
+    assert_eq!(extract_group(&upload), "Freestylemix");
 }
 
 #[test]
@@ -226,7 +282,8 @@ fn test_upload_to_stream_complete() {
     let stream = upload_to_stream(&upload).unwrap();
     assert_eq!(stream.id, "12345");
     assert_eq!(stream.name, "Cool Remix - DJ Cool");
-    assert_eq!(stream.url, "https://ccmixter.org/content/djcool/cool_remix.mp3");
+    // HTTPS URLs from the API are converted to HTTP (SSL cert is broken)
+    assert_eq!(stream.url, "http://ccmixter.org/content/djcool/cool_remix.mp3");
     assert_eq!(stream.group, "Remixes");
     assert_eq!(stream.logo, "https://i.creativecommons.org/l/by/4.0/88x31.png");
     assert_eq!(stream.vod_type, "");
@@ -244,7 +301,7 @@ fn test_upload_to_stream_no_audio_returns_none() {
             {
                 "file_name": "stems.zip",
                 "file_format_info": { "mime_type": "application/zip" },
-                "download_url": "https://ccmixter.org/content/someone/stems.zip"
+                "download_url": "http://ccmixter.org/content/someone/stems.zip"
             }
         ]
     });
@@ -262,7 +319,7 @@ fn test_upload_to_stream_no_upload_id() {
             {
                 "file_name": "track.mp3",
                 "file_format_info": { "mime_type": "audio/mpeg" },
-                "download_url": "https://ccmixter.org/content/someone/track.mp3"
+                "download_url": "http://ccmixter.org/content/someone/track.mp3"
             }
         ]
     });
@@ -281,7 +338,7 @@ fn test_upload_to_stream_string_upload_id() {
             {
                 "file_name": "track.mp3",
                 "file_format_info": { "mime_type": "audio/mpeg" },
-                "download_url": "https://ccmixter.org/content/artist/track.mp3"
+                "download_url": "http://ccmixter.org/content/artist/track.mp3"
             }
         ]
     });
@@ -300,7 +357,7 @@ fn test_upload_to_stream_uses_user_name_fallback() {
             {
                 "file_name": "track.mp3",
                 "file_format_info": { "mime_type": "audio/mpeg" },
-                "download_url": "https://ccmixter.org/content/user/track.mp3"
+                "download_url": "http://ccmixter.org/content/user/track.mp3"
             }
         ]
     });
@@ -331,14 +388,14 @@ fn test_upload_to_stream_http_headers_present() {
             {
                 "file_name": "track.mp3",
                 "file_format_info": { "mime_type": "audio/mpeg" },
-                "download_url": "https://ccmixter.org/content/artist/track.mp3"
+                "download_url": "http://ccmixter.org/content/artist/track.mp3"
             }
         ]
     });
 
     let stream = upload_to_stream(&upload).unwrap();
     let headers = stream.http_headers.unwrap();
-    assert_eq!(headers["Referer"], "https://ccmixter.org/");
+    assert_eq!(headers["Referer"], "http://ccmixter.org/");
     assert_eq!(headers["User-Agent"], "Mozilla/5.0");
 }
 
@@ -356,7 +413,7 @@ fn test_parse_multiple_uploads() {
             "upload_extra": { "ccud": "remix" },
             "files": [{
                 "file_format_info": { "mime_type": "audio/mpeg" },
-                "download_url": "https://ccmixter.org/content/artist1/track1.mp3"
+                "download_url": "http://ccmixter.org/content/artist1/track1.mp3"
             }]
         }),
         json!({
@@ -366,7 +423,7 @@ fn test_parse_multiple_uploads() {
             "upload_extra": { "ccud": "sample" },
             "files": [{
                 "file_format_info": { "mime_type": "audio/mpeg" },
-                "download_url": "https://ccmixter.org/content/artist2/track2.mp3"
+                "download_url": "http://ccmixter.org/content/artist2/track2.mp3"
             }]
         }),
         json!({
@@ -375,7 +432,7 @@ fn test_parse_multiple_uploads() {
             "user_name": "artist3",
             "files": [{
                 "file_format_info": { "mime_type": "application/zip" },
-                "download_url": "https://ccmixter.org/content/artist3/stems.zip"
+                "download_url": "http://ccmixter.org/content/artist3/stems.zip"
             }]
         }),
     ];

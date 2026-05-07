@@ -137,10 +137,8 @@ fn kv_set(key: &str, value: &str) {
 /// Piped API instances ordered by reliability. The first working instance
 /// is cached in KV so subsequent calls try it first.
 const PIPED_INSTANCES: &[&str] = &[
-    "https://pipedapi.kavin.rocks",
     "https://api.piped.private.coffee",
-    "https://pipedapi.adminforge.de",
-    "https://pipedapi.darkness.services",
+    "https://pipedapi.in.projectsegfau.lt",
 ];
 
 const KV_KEY_INSTANCE: &str = "piped_instance";

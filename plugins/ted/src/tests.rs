@@ -13,38 +13,34 @@ fn sample_rss_feed() -> &'static str {
     <item>
       <title>The power of introverts | Susan Cain</title>
       <link>https://www.ted.com/talks/susan_cain_the_power_of_introverts</link>
-      <enclosure url="https://download.ted.com/talks/SusanCain_2012-480p.mp4" length="43250000" type="video/mp4"/>
+      <enclosure url="https://sphinx.acast.com/p/open/s/ted-talks-daily/e/susan-cain-introverts/media.mp3" length="43250000" type="audio/mpeg"/>
       <itunes:duration>00:19:04</itunes:duration>
       <itunes:summary>In a culture where being social and outgoing are prized above all else, it can be difficult, even shameful, to be an introvert.</itunes:summary>
       <itunes:image href="https://pi.tedcdn.com/r/talkstar-photos.s3.amazonaws.com/uploads/susan_cain.jpg"/>
-      <category>Psychology</category>
     </item>
     <item>
       <title>Do schools kill creativity? | Sir Ken Robinson</title>
       <link>https://www.ted.com/talks/sir_ken_robinson_do_schools_kill_creativity</link>
-      <enclosure url="https://download.ted.com/talks/KenRobinson_2006-480p.mp4" length="58120000" type="video/mp4"/>
+      <enclosure url="https://sphinx.acast.com/p/open/s/ted-talks-daily/e/ken-robinson-creativity/media.mp3" length="58120000" type="audio/mpeg"/>
       <itunes:duration>19:24</itunes:duration>
       <itunes:summary>Sir Ken Robinson makes an entertaining and profoundly moving case for creating an education system that nurtures creativity.</itunes:summary>
       <itunes:image href="https://pi.tedcdn.com/r/talkstar-photos.s3.amazonaws.com/uploads/ken_robinson.jpg"/>
-      <category>Education</category>
     </item>
     <item>
       <title>Your body language may shape who you are | Amy Cuddy</title>
       <link>https://www.ted.com/talks/amy_cuddy_your_body_language_may_shape_who_you_are</link>
-      <enclosure url="https://download.ted.com/talks/AmyCuddy_2012G-480p.mp4" length="61530000" type="video/mp4"/>
+      <enclosure url="https://sphinx.acast.com/p/open/s/ted-talks-daily/e/amy-cuddy-body-language/media.mp3" length="61530000" type="audio/mpeg"/>
       <itunes:duration>00:21:02</itunes:duration>
       <itunes:summary>Body language affects how others see us, but it may also change how we see ourselves.</itunes:summary>
       <itunes:image href="https://pi.tedcdn.com/r/talkstar-photos.s3.amazonaws.com/uploads/amy_cuddy.jpg"/>
-      <category>Psychology</category>
     </item>
     <item>
       <title>How great leaders inspire action | Simon Sinek</title>
       <link>https://www.ted.com/talks/simon_sinek_how_great_leaders_inspire_action</link>
-      <enclosure url="https://download.ted.com/talks/SimonSinek_2009X-480p.mp4" length="54800000" type="video/mp4"/>
+      <enclosure url="https://sphinx.acast.com/p/open/s/ted-talks-daily/e/simon-sinek-leaders/media.mp3" length="54800000" type="audio/mpeg"/>
       <itunes:duration>1110</itunes:duration>
       <itunes:summary>Simon Sinek has a simple but powerful model for inspirational leadership.</itunes:summary>
       <itunes:image href="https://pi.tedcdn.com/r/talkstar-photos.s3.amazonaws.com/uploads/simon_sinek.jpg"/>
-      <category>Leadership</category>
     </item>
   </channel>
 </rss>"#
@@ -57,7 +53,7 @@ fn sample_rss_no_category() -> &'static str {
     <item>
       <title>A talk without a category</title>
       <link>https://www.ted.com/talks/no_category_talk</link>
-      <enclosure url="https://download.ted.com/talks/NoCategory-480p.mp4" type="video/mp4"/>
+      <enclosure url="https://sphinx.acast.com/p/open/s/ted-talks-daily/e/no-category/media.mp3" type="audio/mpeg"/>
       <itunes:duration>15:30</itunes:duration>
       <itunes:summary>This talk has no category tag.</itunes:summary>
     </item>
@@ -72,7 +68,7 @@ fn sample_rss_cdata() -> &'static str {
     <item>
       <title><![CDATA[Why we &amp; our world need rest | Claudia Hammond]]></title>
       <link>https://www.ted.com/talks/claudia_hammond_rest</link>
-      <enclosure url="https://download.ted.com/talks/ClaudiaHammond-480p.mp4" type="video/mp4"/>
+      <enclosure url="https://sphinx.acast.com/p/open/s/ted-talks-daily/e/claudia-hammond-rest/media.mp3" type="audio/mpeg"/>
       <itunes:duration>12:45</itunes:duration>
       <itunes:summary><![CDATA[Claudia Hammond explores why rest isn&apos;t laziness.]]></itunes:summary>
       <category><![CDATA[Health & Wellness]]></category>
@@ -103,19 +99,19 @@ fn test_parse_rss_title_extraction() {
 #[test]
 fn test_parse_rss_url_extraction() {
     let streams = parse_rss_items(sample_rss_feed());
-    assert_eq!(streams[0].url, "https://download.ted.com/talks/SusanCain_2012-480p.mp4");
-    assert_eq!(streams[1].url, "https://download.ted.com/talks/KenRobinson_2006-480p.mp4");
-    assert_eq!(streams[2].url, "https://download.ted.com/talks/AmyCuddy_2012G-480p.mp4");
-    assert_eq!(streams[3].url, "https://download.ted.com/talks/SimonSinek_2009X-480p.mp4");
+    assert_eq!(streams[0].url, "https://sphinx.acast.com/p/open/s/ted-talks-daily/e/susan-cain-introverts/media.mp3");
+    assert_eq!(streams[1].url, "https://sphinx.acast.com/p/open/s/ted-talks-daily/e/ken-robinson-creativity/media.mp3");
+    assert_eq!(streams[2].url, "https://sphinx.acast.com/p/open/s/ted-talks-daily/e/amy-cuddy-body-language/media.mp3");
+    assert_eq!(streams[3].url, "https://sphinx.acast.com/p/open/s/ted-talks-daily/e/simon-sinek-leaders/media.mp3");
 }
 
 #[test]
-fn test_parse_rss_grouping_by_category() {
+fn test_parse_rss_grouping_defaults_to_ted_talks() {
     let streams = parse_rss_items(sample_rss_feed());
-    assert_eq!(streams[0].group, "Psychology");
-    assert_eq!(streams[1].group, "Education");
-    assert_eq!(streams[2].group, "Psychology");
-    assert_eq!(streams[3].group, "Leadership");
+    // The real TED RSS feed has no <category> tags, so all items default to "TED Talks"
+    for s in &streams {
+        assert_eq!(s.group, "TED Talks");
+    }
 }
 
 #[test]
@@ -129,7 +125,7 @@ fn test_parse_rss_default_group_when_no_category() {
 fn test_parse_rss_vod_type() {
     let streams = parse_rss_items(sample_rss_feed());
     for s in &streams {
-        assert_eq!(s.vod_type, "movie");
+        assert_eq!(s.vod_type, "podcast");
     }
 }
 
@@ -297,11 +293,11 @@ fn test_extract_attr_not_found() {
 fn test_extract_enclosure_url() {
     let item = r#"<item>
       <title>Test</title>
-      <enclosure url="https://download.ted.com/talks/Test-480p.mp4" length="12345" type="video/mp4"/>
+      <enclosure url="https://sphinx.acast.com/p/open/s/ted-talks-daily/e/test-talk/media.mp3" length="12345" type="audio/mpeg"/>
     </item>"#;
     assert_eq!(
         extract_enclosure_url(item),
-        "https://download.ted.com/talks/Test-480p.mp4"
+        "https://sphinx.acast.com/p/open/s/ted-talks-daily/e/test-talk/media.mp3"
     );
 }
 
@@ -399,4 +395,44 @@ fn test_parse_rss_long_summary_truncated() {
     let ep = streams[0].episode_name.as_ref().unwrap();
     assert!(ep.len() <= 303); // 297 chars + "..."
     assert!(ep.ends_with("..."));
+}
+
+// ============================================================
+// Tests: Item limit
+// ============================================================
+
+#[test]
+fn test_parse_rss_limits_to_max_items() {
+    // Generate a feed with 250 items -- more than MAX_ITEMS (200)
+    let mut xml = String::from(r#"<?xml version="1.0"?><rss><channel>"#);
+    for i in 0..250 {
+        xml.push_str(&format!(
+            r#"<item>
+              <title>Talk {}</title>
+              <link>https://www.ted.com/talks/talk_{}</link>
+              <enclosure url="https://sphinx.acast.com/p/open/s/ted/e/talk-{}/media.mp3" type="audio/mpeg"/>
+            </item>"#,
+            i, i, i
+        ));
+    }
+    xml.push_str("</channel></rss>");
+
+    let streams = parse_rss_items(&xml);
+    assert_eq!(streams.len(), MAX_ITEMS);
+}
+
+// ============================================================
+// Tests: Acast MP3 URL handling
+// ============================================================
+
+#[test]
+fn test_extract_enclosure_url_acast_mp3() {
+    let item = r#"<item>
+      <title>Test Acast</title>
+      <enclosure url="https://sphinx.acast.com/p/open/s/ted-talks-daily/e/some-episode/media.mp3" length="12345" type="audio/mpeg"/>
+    </item>"#;
+    assert_eq!(
+        extract_enclosure_url(item),
+        "https://sphinx.acast.com/p/open/s/ted-talks-daily/e/some-episode/media.mp3"
+    );
 }

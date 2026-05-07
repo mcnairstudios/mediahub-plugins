@@ -267,13 +267,21 @@ pub fn strip_cdata(s: &str) -> &str {
     }
 }
 
+/// Maximum number of items to parse from the feed.
+/// The TED RSS feed contains ~2,700 items (9MB); we cap to keep things manageable.
+const MAX_ITEMS: usize = 200;
+
 /// Parse all <item> blocks from the RSS feed XML into Stream objects.
+/// At most `MAX_ITEMS` items are returned.
 pub fn parse_rss_items(xml: &str) -> Vec<Stream> {
     let mut streams = Vec::new();
     let mut seen_ids = HashSet::new();
     let mut search_from = 0;
 
     loop {
+        if streams.len() >= MAX_ITEMS {
+            break;
+        }
         // Find next <item> block
         let item_start = match xml[search_from..].find("<item>") {
             Some(pos) => search_from + pos,
@@ -386,7 +394,7 @@ pub fn parse_rss_items(xml: &str) -> Vec<Stream> {
             url: video_url.to_string(),
             group,
             logo,
-            vod_type: "movie".to_string(),
+            vod_type: "podcast".to_string(),
             tags,
             episode_name,
         });
@@ -442,7 +450,7 @@ pub extern "C" fn describe() -> u64 {
         short_label: "TED",
         color: "#e62b1e",
         version: "1.0.0",
-        description: "TED Talks with direct MP4 video URLs from the official RSS feed",
+        description: "TED Talks audio from the official RSS feed (via Acast)",
         config_fields: vec![],
         view: View {
             layout: "grouped_list",

@@ -188,11 +188,11 @@ struct Stream {
 // Constants
 // ============================================================
 
-const YOUTUBE_RSS_URL: &str =
-    "https://www.youtube.com/feeds/videos.xml?channel_id=UCBTlXPAfOx300RZfWNw8-qg";
+const PIPED_API_PRIMARY: &str =
+    "https://api.piped.private.coffee/channel/UCBTlXPAfOx300RZfWNw8-qg";
 
-const PLAYLIST_URL: &str =
-    "https://www.youtube.com/playlist?list=PLYAQ82KNFI_cYU0EtHMphfNgZ8-h2N-S-";
+const PIPED_API_BACKUP: &str =
+    "https://pipedapi.in.projectsegfau.lt/channel/UCBTlXPAfOx300RZfWNw8-qg";
 
 const CACHE_KEY: &str = "operavision_streams";
 
@@ -276,154 +276,74 @@ fn detect_tags(title: &str) -> Vec<String> {
     tags
 }
 
-/// Extract video IDs from YouTube RSS XML feed.
+/// Parse the Piped API JSON response into a list of (video_id, title) pairs.
 ///
-/// Looks for `<yt:videoId>XXXX</yt:videoId>` tags and corresponding
-/// `<title>XXXX</title>` tags within `<entry>` elements.
-/// Returns a list of (video_id, title) pairs.
-fn parse_rss_xml(xml: &str) -> Vec<(String, String)> {
-    let mut results = Vec::new();
-    let mut search_from = 0;
+/// The Piped API returns JSON like:
+/// ```json
+/// {
+///   "name": "OperaVision",
+///   "relatedStreams": [
+///     { "url": "/watch?v=VIDEO_ID", "title": "...", "thumbnail": "...", "duration": 1234 }
+///   ]
+/// }
+/// ```
+fn parse_piped_json(json_str: &str) -> Vec<(String, String)> {
+    let parsed: Value = match serde_json::from_str(json_str) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
 
-    loop {
-        // Find the next <entry> block
-        let entry_start = match xml[search_from..].find("<entry>") {
-            Some(pos) => search_from + pos,
-            None => break,
-        };
-        let entry_end = match xml[entry_start..].find("</entry>") {
-            Some(pos) => entry_start + pos + 8,
-            None => break,
-        };
-        let entry = &xml[entry_start..entry_end];
+    let streams = match parsed.get("relatedStreams").and_then(|s| s.as_array()) {
+        Some(arr) => arr,
+        None => return Vec::new(),
+    };
 
-        // Extract video ID
-        let video_id = extract_tag_content(entry, "<yt:videoId>", "</yt:videoId>");
-        // Extract title (within entry, the <title> after <yt:videoId>)
-        let title = extract_tag_content(entry, "<title>", "</title>");
-
-        if let Some(vid) = video_id {
-            let t = title.unwrap_or_default();
-            if !vid.is_empty() {
-                results.push((vid, t));
-            }
-        }
-
-        search_from = entry_end;
-    }
-
-    results
-}
-
-/// Extract text content between an opening and closing XML tag.
-fn extract_tag_content(text: &str, open_tag: &str, close_tag: &str) -> Option<String> {
-    let start = text.find(open_tag)?;
-    let content_start = start + open_tag.len();
-    let end = text[content_start..].find(close_tag)?;
-    let content = &text[content_start..content_start + end];
-    Some(content.trim().to_string())
-}
-
-/// Extract video IDs from YouTube playlist HTML page.
-///
-/// The playlist page contains video IDs in `"videoId":"XXXXXXXXXXX"` patterns
-/// within the ytInitialData JSON blob embedded in the HTML.
-/// Returns a list of (video_id, title) pairs.
-fn parse_playlist_html(html: &str) -> Vec<(String, String)> {
     let mut results = Vec::new();
     let mut seen_ids: Vec<String> = Vec::new();
 
-    // Strategy: find ytInitialData JSON and extract videoId + title pairs
-    // The pattern in playlist HTML is:
-    //   "videoId":"XXXXXXXXXXX" near "title":{"runs":[{"text":"TITLE"}]}
-    // We look for playlistVideoRenderer objects.
-
-    let marker = "\"playlistVideoRenderer\"";
-    let mut search_from = 0;
-
-    loop {
-        let pos = match html[search_from..].find(marker) {
-            Some(p) => search_from + p,
-            None => break,
+    for stream in streams {
+        let url = match stream.get("url").and_then(|u| u.as_str()) {
+            Some(u) => u,
+            None => continue,
         };
 
-        // Grab a reasonable chunk after the marker to find videoId and title
-        let chunk_end = (pos + 2000).min(html.len());
-        let chunk = &html[pos..chunk_end];
+        let video_id = match extract_video_id_from_path(url) {
+            Some(id) => id,
+            None => continue,
+        };
 
-        // Extract videoId
-        let video_id = extract_json_string_value(chunk, "\"videoId\":\"");
-
-        // Extract title text from "title":{"runs":[{"text":"..."}]}
-        // or "title":{"simpleText":"..."}
-        let title = extract_playlist_item_title(chunk);
-
-        if let Some(vid) = video_id {
-            if !vid.is_empty() && !seen_ids.contains(&vid) {
-                seen_ids.push(vid.clone());
-                let t = title.unwrap_or_default();
-                results.push((vid, t));
-            }
+        if seen_ids.contains(&video_id) {
+            continue;
         }
 
-        search_from = pos + marker.len();
+        let title = stream
+            .get("title")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        seen_ids.push(video_id.clone());
+        results.push((video_id, title));
     }
 
     results
 }
 
-/// Extract a JSON string value that follows the given prefix pattern.
-/// e.g., for prefix `"videoId":"`, extracts the string until the next `"`.
-fn extract_json_string_value(text: &str, prefix: &str) -> Option<String> {
-    let start = text.find(prefix)?;
-    let value_start = start + prefix.len();
-    let end = text[value_start..].find('"')?;
-    let value = &text[value_start..value_start + end];
-    // Sanity check: YouTube video IDs are 11 chars, alphanumeric + dash + underscore
-    if value.len() > 20 || value.is_empty() {
+/// Extract a YouTube video ID from a Piped URL path like "/watch?v=VIDEO_ID".
+fn extract_video_id_from_path(path: &str) -> Option<String> {
+    let marker = "v=";
+    let start = path.find(marker)?;
+    let id_start = start + marker.len();
+    let rest = &path[id_start..];
+    // Video ID ends at '&' or end of string
+    let id = match rest.find('&') {
+        Some(pos) => &rest[..pos],
+        None => rest,
+    };
+    if id.is_empty() || id.len() > 20 {
         return None;
     }
-    Some(value.to_string())
-}
-
-/// Extract the title of a playlist item from a chunk of JSON-like HTML.
-fn extract_playlist_item_title(chunk: &str) -> Option<String> {
-    // Try "title":{"runs":[{"text":"..."}]}
-    if let Some(pos) = chunk.find("\"title\":{\"runs\":[{\"text\":\"") {
-        let prefix = "\"title\":{\"runs\":[{\"text\":\"";
-        let value_start = pos + prefix.len();
-        if let Some(end) = chunk[value_start..].find('"') {
-            let title = &chunk[value_start..value_start + end];
-            if !title.is_empty() {
-                return Some(unescape_json_string(title));
-            }
-        }
-    }
-
-    // Try "title":{"simpleText":"..."}
-    if let Some(pos) = chunk.find("\"title\":{\"simpleText\":\"") {
-        let prefix = "\"title\":{\"simpleText\":\"";
-        let value_start = pos + prefix.len();
-        if let Some(end) = chunk[value_start..].find('"') {
-            let title = &chunk[value_start..value_start + end];
-            if !title.is_empty() {
-                return Some(unescape_json_string(title));
-            }
-        }
-    }
-
-    None
-}
-
-/// Basic unescape for JSON string content (handles common escapes).
-fn unescape_json_string(s: &str) -> String {
-    s.replace("\\\"", "\"")
-        .replace("\\\\", "\\")
-        .replace("\\n", "\n")
-        .replace("\\u0026", "&")
-        .replace("\\u003c", "<")
-        .replace("\\u003e", ">")
-        .replace("\\u0027", "'")
+    Some(id.to_string())
 }
 
 /// Convert a list of (video_id, title) pairs into Stream objects.
@@ -452,20 +372,18 @@ fn build_streams(items: &[(String, String)]) -> Vec<Stream> {
         .collect()
 }
 
-/// Merge two lists of streams, deduplicating by video ID.
-/// The first list takes priority (its entries are kept if duplicated).
-fn merge_streams(primary: Vec<Stream>, secondary: Vec<Stream>) -> Vec<Stream> {
-    let mut seen: Vec<String> = Vec::new();
-    let mut merged = Vec::new();
-
-    for stream in primary.into_iter().chain(secondary.into_iter()) {
-        if !seen.contains(&stream.id) {
-            seen.push(stream.id.clone());
-            merged.push(stream);
-        }
+/// Fetch channel data from a Piped API instance.
+/// Returns the parsed (video_id, title) pairs, or None on failure.
+fn fetch_piped(url: &str) -> Option<Vec<(String, String)>> {
+    let headers = r#"{"User-Agent":"Mozilla/5.0"}"#;
+    let body = http_get_with_headers(url, headers)?;
+    let json_str = String::from_utf8_lossy(&body).to_string();
+    let items = parse_piped_json(&json_str);
+    if items.is_empty() {
+        None
+    } else {
+        Some(items)
     }
-
-    merged
 }
 
 // ============================================================
@@ -509,38 +427,29 @@ pub extern "C" fn refresh(config_ptr: u32, config_len: u32) -> u64 {
         }
     }
 
-    // Fetch playlist page (primary source)
-    let consent_headers = r#"{"Cookie":"CONSENT=YES+1"}"#;
-    let playlist_streams = match http_get_with_headers(PLAYLIST_URL, consent_headers) {
-        Some(body) => {
-            let html = String::from_utf8_lossy(&body).to_string();
-            let items = parse_playlist_html(&html);
-            log_info(&format!("parsed {} items from playlist", items.len()));
-            build_streams(&items)
+    // Fetch from Piped API (primary instance, with backup fallback)
+    let items = match fetch_piped(PIPED_API_PRIMARY) {
+        Some(items) => {
+            log_info(&format!("parsed {} items from primary Piped API", items.len()));
+            items
         }
         None => {
-            log_error("failed to fetch playlist page");
-            Vec::new()
+            log_error("primary Piped API failed, trying backup");
+            match fetch_piped(PIPED_API_BACKUP) {
+                Some(items) => {
+                    log_info(&format!("parsed {} items from backup Piped API", items.len()));
+                    items
+                }
+                None => {
+                    log_error("backup Piped API also failed");
+                    Vec::new()
+                }
+            }
         }
     };
 
-    // Fetch RSS feed (secondary source for recent uploads)
-    let rss_streams = match http_get_with_headers(YOUTUBE_RSS_URL, "{}") {
-        Some(body) => {
-            let xml = String::from_utf8_lossy(&body).to_string();
-            let items = parse_rss_xml(&xml);
-            log_info(&format!("parsed {} items from RSS feed", items.len()));
-            build_streams(&items)
-        }
-        None => {
-            log_error("failed to fetch RSS feed");
-            Vec::new()
-        }
-    };
-
-    // Merge: playlist is primary, RSS is secondary
-    let streams = merge_streams(playlist_streams, rss_streams);
-    log_info(&format!("total unique streams: {}", streams.len()));
+    let streams = build_streams(&items);
+    log_info(&format!("total streams: {}", streams.len()));
 
     let response = RefreshResponse { streams };
 
